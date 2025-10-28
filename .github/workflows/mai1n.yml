@@ -46,11 +46,8 @@ jobs:
               $username = "User$i"
               
               try {
-                  # Create user with no password using net user command (more reliable for blank passwords)
+                  # Create user with no password using net user command
                   net user $username /add /passwordreq:no /expires:never /active:yes
-                  
-                  # Set password to never expire and user doesn't need to change it
-                  wmic useraccount where name="$username" set PasswordExpires=false
                   
                   # Add to groups
                   net localgroup "Remote Desktop Users" $username /add
@@ -63,7 +60,42 @@ jobs:
               }
           }
           
-          Write-Host "`nAll 10 users created successfully with NO password!"
+          Write-Host "`nAll 10 users created successfully!"
+
+      - name: Grant Remote Desktop Logon Rights
+        run: |
+          Write-Host "Granting 'Allow log on through Remote Desktop Services' right..."
+          
+          # Export current security policy
+          secedit /export /cfg C:\secpol.cfg
+          
+          # Read current policy
+          $content = Get-Content C:\secpol.cfg
+          
+          # Find the line with SeRemoteInteractiveLogonRight and add our users
+          $newContent = @()
+          foreach ($line in $content) {
+              if ($line -like "SeRemoteInteractiveLogonRight*") {
+                  # Add all User1-User10 to the RDP logon right
+                  $users = ""
+                  for ($i = 1; $i -le 10; $i++) {
+                      $users += ",User$i"
+                  }
+                  # Keep existing rights and add new users
+                  $line = $line + $users
+              }
+              $newContent += $line
+          }
+          
+          # Save modified policy
+          $newContent | Out-File C:\secpol.cfg
+          
+          # Apply the modified policy
+          secedit /configure /db c:\windows\security\local.sdb /cfg C:\secpol.cfg /areas USER_RIGHTS
+          
+          Remove-Item -Force C:\secpol.cfg -Confirm:$false
+          
+          Write-Host "Remote Desktop logon rights granted to all users!"
 
       - name: Install Tailscale
         run: |
@@ -113,7 +145,7 @@ jobs:
           Write-Host "  User1, User2, User3, User4, User5"
           Write-Host "  User6, User7, User8, User9, User10"
           Write-Host ""
-          Write-Host "Password: NONE (leave blank, just click Sign in)"
+          Write-Host "Password: NONE (leave blank, just press Enter)"
           Write-Host "========================================`n"
           
           while ($true) {
