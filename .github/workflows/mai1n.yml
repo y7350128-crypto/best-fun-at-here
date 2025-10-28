@@ -38,7 +38,7 @@ jobs:
 
       - name: Install RDP Wrapper for Multiple Sessions
         run: |
-          Write-Host "Installing RDP Wrapper..."
+          Write-Host "Installing RDP Wrapper to enable multiple RDP sessions..."
           
           $url = "https://github.com/stascorp/rdpwrap/releases/download/v1.6.2/RDPWrap-v1.6.2.zip"
           $output = "$env:TEMP\RDPWrap.zip"
@@ -62,46 +62,36 @@ jobs:
               Write-Warning "RDP Wrapper installation failed: $($_.Exception.Message)"
           }
 
-      - name: Download User Template from Google Drive
+      - name: Install 7-Zip and Download RAR Template
         run: |
-          Write-Host "Downloading user template ZIP from Google Drive..."
+          Write-Host "Installing 7-Zip..."
+          choco install 7zip -y
+          
+          Write-Host "Downloading RAR template from Google Drive..."
           
           $fileId = "1uw9Z-0XJWuQHZAXuGNKtPD6322V7r0iP"
-          $zipPath = "$env:TEMP\UserTemplate.zip"
+          $rarPath = "$env:TEMP\UserTemplate.rar"
           $extractPath = "$env:TEMP\UserTemplate"
           
-          # Download from Google Drive using direct download link
-          $url = "https://drive.google.com/uc?export=download&id=$fileId"
+          # Download RAR file
+          curl -L -o $rarPath "https://drive.google.com/uc?export=download&id=$fileId"
           
-          try {
-              # First request
-              $response = Invoke-WebRequest -Uri $url -SessionVariable session -UseBasicParsing
-              
-              # Check if there's a confirmation page (for large files)
-              if ($response.Content -match 'download_warning') {
-                  # Extract confirm token
-                  $confirm = $response.Content -match 'confirm=([^&]+)' | Out-Null
-                  $confirmToken = $matches[1]
-                  $url = "https://drive.google.com/uc?export=download&id=$fileId&confirm=$confirmToken"
-              }
-              
-              # Download the file
-              Invoke-WebRequest -Uri $url -OutFile $zipPath -WebSession $session -UseBasicParsing
-              Write-Host "Downloaded ZIP file from Google Drive"
-              
-              # Extract ZIP
-              Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
-              Write-Host "Extracted user template"
-              
-              # List contents
-              Write-Host "Template contents:"
-              Get-ChildItem -Path $extractPath -Recurse | Select-Object -First 20 | ForEach-Object { Write-Host $_.FullName }
-          }
-          catch {
-              Write-Warning "Download failed: $($_.Exception.Message)"
+          Write-Host "Downloaded RAR: $(Get-Item $rarPath).Length bytes"
+          
+          # Create extract directory
+          New-Item -Path $extractPath -ItemType Directory -Force | Out-Null
+          
+          # Extract RAR using 7-Zip
+          & "C:\Program Files\7-Zip\7z.exe" x $rarPath -o"$extractPath" -y
+          
+          Write-Host "Extracted RAR successfully!"
+          
+          Write-Host "`nExtracted contents:"
+          Get-ChildItem -Path $extractPath | ForEach-Object {
+              Write-Host "  - $($_.Name)"
           }
 
-      - name: Create 10 Local Users
+      - name: Create 10 Local Users with No Password
         run: |
           Write-Host "Creating 10 local users..."
           
@@ -122,65 +112,78 @@ jobs:
           
           Write-Host "All 10 users created successfully!"
 
-      - name: Create User Profiles and Apply Template
+      - name: Create User Profiles and Apply Custom Template
         run: |
           Write-Host "Creating user profiles and applying custom template..."
           
-          $templatePath = "$env:TEMP\UserTemplate"
+          $extractPath = "$env:TEMP\UserTemplate"
           $usersPath = "C:\Users"
           
-          # Find the actual template folder (might be inside a subfolder)
-          $templateRoot = Get-ChildItem -Path $templatePath -Directory | Select-Object -First 1
-          if ($templateRoot) {
-              $templatePath = $templateRoot.FullName
+          # Find the actual template folder (RAR might extract to subfolder)
+          $templateFolder = Get-ChildItem -Path $extractPath -Directory | Select-Object -First 1
+          if ($templateFolder) {
+              $templatePath = $templateFolder.FullName
               Write-Host "Using template from: $templatePath"
+          } else {
+              $templatePath = $extractPath
+              Write-Host "Using template from: $templatePath"
+          }
+          
+          # Show what will be copied
+          Write-Host "`nTemplate contents to copy:"
+          Get-ChildItem -Path $templatePath | ForEach-Object {
+              Write-Host "  - $($_.Name) [$($_.PSIsContainer)]"
           }
           
           for ($i = 1; $i -le 10; $i++) {
               $username = "User$i"
               $userProfilePath = "$usersPath\$username"
               
+              Write-Host "`n--- Setting up $username ---"
+              
               try {
                   # Create user profile directory
                   New-Item -Path $userProfilePath -ItemType Directory -Force | Out-Null
                   Write-Host "Created profile folder: $userProfilePath"
                   
-                  # Copy all template contents to user folder
-                  if (Test-Path $templatePath) {
-                      Get-ChildItem -Path $templatePath -Force | ForEach-Object {
-                          try {
-                              Copy-Item -Path $_.FullName -Destination $userProfilePath -Recurse -Force -ErrorAction Continue
-                              Write-Host "Copied: $($_.Name)"
-                          }
-                          catch {
-                              Write-Warning "Failed to copy $($_.Name): $($_.Exception.Message)"
-                          }
+                  # Copy all folders from template
+                  Get-ChildItem -Path $templatePath -Directory -Force | ForEach-Object {
+                      $destFolder = Join-Path $userProfilePath $_.Name
+                      try {
+                          Copy-Item -Path $_.FullName -Destination $destFolder -Recurse -Force -ErrorAction Continue
+                          Write-Host "  Copied folder: $($_.Name)"
+                      }
+                      catch {
+                          Write-Warning "  Failed to copy folder $($_.Name): $($_.Exception.Message)"
                       }
                   }
                   
-                  # Set ownership
-                  try {
-                      $acl = Get-Acl $userProfilePath
-                      $userAccount = New-Object System.Security.Principal.NTAccount($username)
-                      $acl.SetOwner($userAccount)
-                      
-                      # Grant full control
-                      $accessRule = New-Object System.Security.AccessControl.FileSystemAccessRule($username, "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
-                      $acl.AddAccessRule($accessRule)
-                      Set-Acl -Path $userProfilePath -AclObject $acl
-                      
-                      Write-Host "Set permissions for $username"
+                  # Copy all files from template (like ntuser.dat)
+                  Get-ChildItem -Path $templatePath -File -Force | ForEach-Object {
+                      try {
+                          Copy-Item -Path $_.FullName -Destination $userProfilePath -Force -ErrorAction Continue
+                          Write-Host "  Copied file: $($_.Name)"
+                      }
+                      catch {
+                          Write-Warning "  Failed to copy file $($_.Name): $($_.Exception.Message)"
+                      }
                   }
-                  catch {
-                      Write-Warning "Failed to set permissions for $username"
-                  }
+                  
+                  # Set ownership and permissions using icacls
+                  icacls $userProfilePath /grant "${username}:(OI)(CI)F" /T /C /Q
+                  Write-Host "  Set permissions for $username"
+                  
+                  # Verify what was copied
+                  $itemCount = (Get-ChildItem -Path $userProfilePath -Force | Measure-Object).Count
+                  Write-Host "  Total items in profile: $itemCount"
+                  
               }
               catch {
-                  Write-Warning "Error setting up profile for $username : $($_.Exception.Message)"
+                  Write-Error "Failed to setup profile for $username : $($_.Exception.Message)"
               }
           }
           
-          Write-Host "`nAll user profiles created with custom template!"
+          Write-Host "`n=== All user profiles created with custom template ==="
 
       - name: Grant Remote Desktop Logon Rights
         run: |
@@ -205,19 +208,25 @@ jobs:
           secedit /configure /db c:\windows\security\local.sdb /cfg C:\secpol.cfg /areas USER_RIGHTS
           Remove-Item -Force C:\secpol.cfg -Confirm:$false
           
-          Write-Host "Remote Desktop logon rights granted!"
+          Write-Host "Remote Desktop logon rights granted to all users!"
 
       - name: Install Tailscale
         run: |
+          Write-Host "Installing Tailscale..."
+          
           $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
           $installerPath = "$env:TEMP\tailscale.msi"
           
           Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
           Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
           Remove-Item $installerPath -Force
+          
+          Write-Host "Tailscale installed successfully!"
 
       - name: Establish Tailscale Connection
         run: |
+          Write-Host "Connecting to Tailscale..."
+          
           & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID
           
           $tsIP = $null
@@ -232,10 +241,13 @@ jobs:
               Write-Error "Tailscale IP not assigned. Exiting."
               exit 1
           }
+          
+          Write-Host "Tailscale connected! IP: $tsIP"
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
-
+      
       - name: Verify RDP Accessibility
         run: |
+          Write-Host "Verifying RDP accessibility..."
           Write-Host "Tailscale IP: $env:TAILSCALE_IP"
           
           $testResult = Test-NetConnection -ComputerName $env:TAILSCALE_IP -Port 3389
@@ -243,24 +255,26 @@ jobs:
               Write-Error "TCP connection to RDP port 3389 failed"
               exit 1
           }
-          Write-Host "TCP connectivity successful!"
+          Write-Host "TCP connectivity to RDP port successful!"
 
       - name: Maintain Connection
         run: |
           Write-Host "`n========================================="
-          Write-Host "RDP SERVER READY"
+          Write-Host "      RDP SERVER READY"
           Write-Host "========================================="
           Write-Host "IP Address: $env:TAILSCALE_IP"
-          Write-Host "Available Users: User1-User10"
-          Write-Host "Password: NONE (leave blank, press Enter)"
+          Write-Host "Available Users: User1, User2, User3, User4, User5,"
+          Write-Host "                 User6, User7, User8, User9, User10"
+          Write-Host "Password: NONE (leave blank, just press Enter)"
           Write-Host ""
-          Write-Host "Custom user profiles applied from Google Drive!"
-          Write-Host "All folders and ntuser.dat copied to each user."
-          Write-Host ""
-          Write-Host "Multiple RDP sessions supported!"
+          Write-Host "Features:"
+          Write-Host "  - Multiple RDP sessions supported (RDP Wrapper)"
+          Write-Host "  - Custom user profiles applied from Google Drive"
+          Write-Host "  - All folders and files copied to each user"
+          Write-Host "  - No password required"
           Write-Host "========================================`n"
           
           while ($true) {
-              Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] RDP Active - Multiple sessions enabled"
+              Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] RDP Server Active - 10 users ready for connection"
               Start-Sleep -Seconds 300
           }
