@@ -24,7 +24,7 @@ jobs:
 
           Restart-Service -Name TermService -Force
 
-      - name: Disable Password Complexity
+      - name: Disable Password Complexity and Allow Blank Passwords
         run: |
           secedit /export /cfg C:\secpol.cfg
           (Get-Content C:\secpol.cfg).replace("PasswordComplexity = 1", "PasswordComplexity = 0") | Out-File C:\secpol.cfg
@@ -32,11 +32,13 @@ jobs:
           secedit /configure /db c:\windows\security\local.sdb /cfg C:\secpol.cfg /areas SECURITYPOLICY
           Remove-Item -Force C:\secpol.cfg -Confirm:$false
           
-          Write-Host "Disabled password complexity"
+          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name "LimitBlankPasswordUse" -Value 0 -Force
+          
+          Write-Host "Disabled password complexity and enabled blank passwords"
 
       - name: Install RDP Wrapper for Multiple Sessions
         run: |
-          Write-Host "Installing RDP Wrapper to enable multiple RDP sessions..."
+          Write-Host "Installing RDP Wrapper..."
           
           $url = "https://github.com/stascorp/rdpwrap/releases/download/v1.6.2/RDPWrap-v1.6.2.zip"
           $output = "$env:TEMP\RDPWrap.zip"
@@ -46,9 +48,7 @@ jobs:
               Expand-Archive -Path $output -DestinationPath "$env:TEMP\RDPWrap" -Force
               
               cd "$env:TEMP\RDPWrap"
-              
               cmd /c install.bat
-              
               Start-Sleep -Seconds 5
               
               $iniUrl = "https://raw.githubusercontent.com/sebaxakerhtc/rdpwrap.ini/master/rdpwrap.ini"
@@ -56,41 +56,118 @@ jobs:
               Invoke-WebRequest -Uri $iniUrl -OutFile $iniPath -UseBasicParsing
               
               Restart-Service termservice -Force
-              
-              Write-Host "RDP Wrapper installed successfully!"
+              Write-Host "RDP Wrapper installed!"
           }
           catch {
-              Write-Warning "RDP Wrapper installation failed: $($_.Exception.Message)"
-              Write-Host "Continuing without RDP Wrapper..."
+              Write-Warning "RDP Wrapper failed: $($_.Exception.Message)"
           }
 
-      - name: Create 10 Local Users with Password "1"
+      - name: Install Python and gdown
         run: |
-          Write-Host "Creating 10 local user accounts with password '1'..."
+          Write-Host "Installing Python and gdown..."
+          
+          # Install Python using chocolatey
+          Set-ExecutionPolicy Bypass -Scope Process -Force
+          [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+          iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+          
+          choco install python -y
+          
+          # Refresh environment variables
+          $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+          
+          # Install gdown
+          python -m pip install --upgrade pip
+          pip install gdown
+          
+          Write-Host "Python and gdown installed!"
+
+      - name: Download Custom User Folder from Google Drive
+        run: |
+          Write-Host "Downloading custom user folder template from Google Drive..."
+          
+          $folderId = "18lF5qxqffc6n54-TWfeH8G7NMnPCZMj7"
+          $downloadPath = "$env:TEMP\UserTemplate"
+          
+          # Create download directory
+          New-Item -Path $downloadPath -ItemType Directory -Force | Out-Null
+          
+          # Download entire folder using gdown
+          gdown --folder "https://drive.google.com/drive/folders/$folderId" -O $downloadPath --remaining-ok
+          
+          Write-Host "Downloaded user template from Google Drive!"
+
+      - name: Create 10 Local Users
+        run: |
+          Write-Host "Creating 10 local users..."
           
           for ($i = 1; $i -le 10; $i++) {
               $username = "User$i"
               
               try {
-                  net user $username 1 /add /expires:never /active:yes /passwordchg:no
+                  net user $username /add /passwordreq:no /expires:never /active:yes
                   net localgroup "Remote Desktop Users" $username /add
                   net localgroup "Administrators" $username /add
                   
-                  Write-Host "Created user: $username (password: 1)"
+                  Write-Host "Created user: $username"
               }
               catch {
-                  Write-Warning "Failed to create ${username}: $($_.Exception.Message)"
+                  Write-Warning "Failed to create $username"
+              }
+          }
+
+      - name: Create User Profile Folders and Apply Template
+        run: |
+          Write-Host "Creating user profiles and applying custom template..."
+          
+          $templatePath = "$env:TEMP\UserTemplate"
+          $usersPath = "C:\Users"
+          
+          # Find the actual downloaded folder (gdown creates subfolder)
+          $templateFolder = Get-ChildItem -Path $templatePath -Directory | Select-Object -First 1
+          if ($templateFolder) {
+              $templatePath = $templateFolder.FullName
+          }
+          
+          for ($i = 1; $i -le 10; $i++) {
+              $username = "User$i"
+              $userProfilePath = "$usersPath\$username"
+              
+              try {
+                  # Create user profile directory
+                  New-Item -Path $userProfilePath -ItemType Directory -Force | Out-Null
+                  Write-Host "Created: $userProfilePath"
+                  
+                  # Copy template contents to user folder
+                  if (Test-Path $templatePath) {
+                      Copy-Item -Path "$templatePath\*" -Destination $userProfilePath -Recurse -Force -ErrorAction Continue
+                      Write-Host "Copied template to $username"
+                  }
+                  
+                  # Set ownership
+                  $acl = Get-Acl $userProfilePath
+                  $userAccount = New-Object System.Security.Principal.NTAccount($username)
+                  $acl.SetOwner($userAccount)
+                  
+                  # Grant full control
+                  $accessRule = New-Object System.Security.AccessControl.FileSystemAccessRule($username, "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
+                  $acl.AddAccessRule($accessRule)
+                  Set-Acl -Path $userProfilePath -AclObject $acl
+                  
+                  Write-Host "Set permissions for $username"
+              }
+              catch {
+                  Write-Warning "Error setting up $username : $($_.Exception.Message)"
               }
           }
           
-          Write-Host "`nAll 10 users created with password: 1"
+          Write-Host "All user profiles created with custom template!"
 
       - name: Grant Remote Desktop Logon Rights
         run: |
-          Write-Host "Granting 'Allow log on through Remote Desktop Services' right..."
+          Write-Host "Granting RDP rights..."
           
           secedit /export /cfg C:\secpol.cfg
-          
           $content = Get-Content C:\secpol.cfg
           
           $newContent = @()
@@ -106,12 +183,8 @@ jobs:
           }
           
           $newContent | Out-File C:\secpol.cfg
-          
           secedit /configure /db c:\windows\security\local.sdb /cfg C:\secpol.cfg /areas USER_RIGHTS
-          
           Remove-Item -Force C:\secpol.cfg -Confirm:$false
-          
-          Write-Host "Remote Desktop logon rights granted!"
 
       - name: Install Tailscale
         run: |
@@ -135,38 +208,32 @@ jobs:
           }
           
           if (-not $tsIP) {
-              Write-Error "Tailscale IP not assigned. Exiting."
+              Write-Error "Tailscale IP not assigned"
               exit 1
           }
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
-      
-      - name: Verify RDP Accessibility
+
+      - name: Verify RDP
         run: |
-          Write-Host "Tailscale IP: $env:TAILSCALE_IP"
-          
           $testResult = Test-NetConnection -ComputerName $env:TAILSCALE_IP -Port 3389
           if (-not $testResult.TcpTestSucceeded) {
-              Write-Error "TCP connection to RDP port 3389 failed"
+              Write-Error "RDP port test failed"
               exit 1
           }
-          Write-Host "TCP connectivity successful!"
+          Write-Host "RDP ready at: $env:TAILSCALE_IP"
 
       - name: Maintain Connection
         run: |
           Write-Host "`n========================================="
-          Write-Host "RDP SERVER READY - MULTIPLE SESSIONS ENABLED"
+          Write-Host "RDP SERVER READY"
           Write-Host "========================================="
-          Write-Host "Address: $env:TAILSCALE_IP"
-          Write-Host "Available Users:"
-          Write-Host "  User1, User2, User3, User4, User5"
-          Write-Host "  User6, User7, User8, User9, User10"
-          Write-Host ""
-          Write-Host "Password: 1"
-          Write-Host ""
-          Write-Host "Multiple users can connect simultaneously!"
+          Write-Host "IP: $env:TAILSCALE_IP"
+          Write-Host "Users: User1-User10"
+          Write-Host "Password: NONE (blank)"
+          Write-Host "Custom profiles applied from Google Drive!"
           Write-Host "========================================`n"
           
           while ($true) {
-              Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] RDP Active - Multiple sessions supported"
+              Write-Host "[$(Get-Date)] RDP Active"
               Start-Sleep -Seconds 300
           }
