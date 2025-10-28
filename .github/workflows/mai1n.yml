@@ -104,73 +104,40 @@ jobs:
               }
           }
 
-      - name: Replace Windows Default User Profile
+      - name: Overwrite Windows Default User Profile
         run: |
-          Write-Host "Replacing C:\Users\Default with custom template..."
+          Write-Host "Overwriting C:\Users\Default with custom template..."
           
           $extractPath = "$env:TEMP\UserTemplate"
           $defaultProfilePath = "C:\Users\Default"
           
-          # Find Default folder - handle nested Default folders
+          # Find Default folder
           $defaultFolder = Get-ChildItem -Path $extractPath -Directory -Filter "Default" -Recurse | Select-Object -First 1
           
           if ($defaultFolder) {
-              # If we found a Default folder, use its CONTENTS (not the folder itself)
               $templatePath = $defaultFolder.FullName
-              Write-Host "Found Default folder, using contents from: $templatePath"
+              Write-Host "Found Default folder at: $templatePath"
           } else {
-              # No Default folder found, use first directory
               $firstFolder = Get-ChildItem -Path $extractPath -Directory | Select-Object -First 1
               if ($firstFolder) {
                   $templatePath = $firstFolder.FullName
-                  Write-Host "No Default folder, using: $templatePath"
               } else {
                   $templatePath = $extractPath
-                  Write-Host "Using extract path: $templatePath"
               }
           }
           
-          # Show what's INSIDE the template folder
-          Write-Host "`nContents INSIDE template folder:"
-          Get-ChildItem -Path $templatePath -Force | Select-Object -First 30 | ForEach-Object {
-              if ($_.PSIsContainer) {
-                  Write-Host "  - $($_.Name) [Folder]"
-              } else {
-                  Write-Host "  - $($_.Name) [File]"
-              }
+          # Show contents
+          Write-Host "`nContents inside template:"
+          Get-ChildItem -Path $templatePath -Force | Select-Object -First 20 | ForEach-Object {
+              Write-Host "  - $($_.Name)"
           }
           
-          # Simply delete and recreate Default folder (faster than takeown)
-          Write-Host "`nRemoving old C:\Users\Default..."
+          # Just overwrite everything - copy with Force will overwrite existing files
+          Write-Host "`nCopying and overwriting to C:\Users\Default..."
+          Copy-Item -Path "$templatePath\*" -Destination $defaultProfilePath -Recurse -Force -ErrorAction Continue
           
-          try {
-              # Stop explorer to release locks
-              Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
-              
-              # Delete old Default folder
-              cmd /c "rmdir /s /q C:\Users\Default" 2>$null
-              Start-Sleep -Seconds 2
-              
-              # Create new Default folder
-              New-Item -Path $defaultProfilePath -ItemType Directory -Force | Out-Null
-              Write-Host "Created new C:\Users\Default"
-              
-              # Copy custom template contents to Default folder using robocopy
-              Write-Host "`nCopying template to C:\Users\Default..."
-              robocopy $templatePath $defaultProfilePath /E /MT:16 /R:1 /W:1 /NFL /NDL /NP
-              
-              # Set proper permissions
-              Write-Host "Setting permissions..."
-              icacls $defaultProfilePath /setowner "SYSTEM" /T /C /Q | Out-Null
-              icacls $defaultProfilePath /grant "SYSTEM:(OI)(CI)F" /T /C /Q | Out-Null
-              icacls $defaultProfilePath /grant "Administrators:(OI)(CI)F" /T /C /Q | Out-Null
-              
-              Write-Host "`nC:\Users\Default replaced successfully!"
-              Write-Host "All new users will get this custom profile on first login."
-          }
-          catch {
-              Write-Warning "Error: $($_.Exception.Message)"
-          }
+          Write-Host "`nC:\Users\Default overwritten successfully!"
+          Write-Host "New users will get this custom profile on first login."
 
       - name: Create 10 Local Users
         run: |
@@ -184,7 +151,7 @@ jobs:
               Write-Host "Created: $username"
           }
           
-          Write-Host "`nAll users created! They will get custom profile on first login."
+          Write-Host "`nAll users created!"
 
       - name: Grant Remote Desktop Rights
         run: |
@@ -253,7 +220,6 @@ jobs:
           Write-Host "Password: NONE (blank)"
           Write-Host ""
           Write-Host "Custom Default profile installed!"
-          Write-Host "Users get custom profile on first login!"
           Write-Host "========================================`n"
           
           while ($true) {
