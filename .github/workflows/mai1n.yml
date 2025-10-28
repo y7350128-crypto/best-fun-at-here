@@ -9,6 +9,29 @@ jobs:
     timeout-minutes: 3600
 
     steps:
+      - name: Extend C Drive by Merging D Drive
+        run: |
+          Write-Host "Checking disk configuration..."
+          Get-Volume | Format-Table -AutoSize
+          
+          Write-Host "`nExtending C: drive..."
+          
+          $diskpartCommands = @"
+list volume
+select volume D
+delete volume
+select volume C
+extend
+list volume
+"@
+          
+          $diskpartCommands | diskpart
+          
+          Write-Host "`nDisk configuration after merge:"
+          Get-Volume | Format-Table -AutoSize
+          
+          Write-Host "C: drive extended successfully!"
+
       - name: Configure Core RDP Settings
         run: |
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
@@ -56,10 +79,10 @@ jobs:
               Invoke-WebRequest -Uri $iniUrl -OutFile $iniPath -UseBasicParsing
               
               Restart-Service termservice -Force
-              Write-Host "RDP Wrapper installed!"
+              Write-Host "RDP Wrapper installed successfully!"
           }
           catch {
-              Write-Warning "RDP Wrapper failed"
+              Write-Warning "RDP Wrapper installation failed: $($_.Exception.Message)"
           }
 
       - name: Install Python and gdown
@@ -104,6 +127,65 @@ jobs:
               }
           }
 
+      - name: Replace Windows Default User Profile
+        run: |
+          Write-Host "Replacing C:\Users\Default with custom template..."
+          
+          $extractPath = "$env:TEMP\UserTemplate"
+          $defaultProfilePath = "C:\Users\Default"
+          
+          # Find Default folder inside extracted RAR
+          $defaultFolder = Get-ChildItem -Path $extractPath -Directory -Filter "Default" | Select-Object -First 1
+          
+          if ($defaultFolder) {
+              $templatePath = $defaultFolder.FullName
+              Write-Host "Found custom Default folder at: $templatePath"
+          } else {
+              $firstFolder = Get-ChildItem -Path $extractPath -Directory | Select-Object -First 1
+              if ($firstFolder) {
+                  $templatePath = $firstFolder.FullName
+                  Write-Host "Using folder: $templatePath"
+              } else {
+                  $templatePath = $extractPath
+              }
+          }
+          
+          # Show what will be copied
+          Write-Host "`nContents inside custom Default folder:"
+          Get-ChildItem -Path $templatePath -Force | Select-Object -First 30 | ForEach-Object {
+              if ($_.PSIsContainer) {
+                  Write-Host "  - $($_.Name) [Folder]"
+              } else {
+                  Write-Host "  - $($_.Name) [File]"
+              }
+          }
+          
+          # Take ownership of Default folder
+          Write-Host "`nTaking ownership of C:\Users\Default..."
+          takeown /F $defaultProfilePath /R /D Y | Out-Null
+          icacls $defaultProfilePath /grant Administrators:F /T /C /Q | Out-Null
+          
+          # Backup original Default folder
+          Write-Host "Backing up original Default folder..."
+          if (Test-Path "$defaultProfilePath.backup") {
+              Remove-Item "$defaultProfilePath.backup" -Recurse -Force
+          }
+          Move-Item -Path $defaultProfilePath -Destination "$defaultProfilePath.backup" -Force
+          
+          # Create new Default folder
+          New-Item -Path $defaultProfilePath -ItemType Directory -Force | Out-Null
+          
+          # Copy custom template to Default folder
+          Write-Host "`nCopying custom template to C:\Users\Default..."
+          robocopy $templatePath $defaultProfilePath /E /MT:16 /R:1 /W:1
+          
+          # Set proper permissions on Default folder
+          icacls $defaultProfilePath /grant "SYSTEM:(OI)(CI)F" /T /C /Q | Out-Null
+          icacls $defaultProfilePath /grant "Administrators:(OI)(CI)F" /T /C /Q | Out-Null
+          
+          Write-Host "`nC:\Users\Default replaced successfully!"
+          Write-Host "All new users will automatically get this profile when they first login."
+
       - name: Create 10 Local Users
         run: |
           Write-Host "Creating 10 users..."
@@ -115,89 +197,8 @@ jobs:
               net localgroup "Administrators" $username /add
               Write-Host "Created: $username"
           }
-
-      - name: Create User Profiles and Apply Template in Parallel
-        run: |
-          Write-Host "Setting up user profiles with parallel copying..."
           
-          $extractPath = "$env:TEMP\UserTemplate"
-          $usersPath = "C:\Users"
-          
-          # Find Default folder inside extracted RAR
-          $defaultFolder = Get-ChildItem -Path $extractPath -Directory -Filter "Default" | Select-Object -First 1
-          
-          if ($defaultFolder) {
-              $templatePath = $defaultFolder.FullName
-              Write-Host "Found Default folder at: $templatePath"
-          } else {
-              # If no Default folder, use the first directory
-              $firstFolder = Get-ChildItem -Path $extractPath -Directory | Select-Object -First 1
-              if ($firstFolder) {
-                  $templatePath = $firstFolder.FullName
-                  Write-Host "Using folder: $templatePath"
-              } else {
-                  $templatePath = $extractPath
-              }
-          }
-          
-          # Show template contents (what's INSIDE the Default folder)
-          Write-Host "`nContents inside template folder:"
-          Get-ChildItem -Path $templatePath -Force | Select-Object -First 20 | ForEach-Object {
-              if ($_.PSIsContainer) {
-                  Write-Host "  - $($_.Name) [Folder]"
-              } else {
-                  Write-Host "  - $($_.Name) [File]"
-              }
-          }
-          
-          # Create all user profile directories first
-          Write-Host "`nCreating user profile directories..."
-          for ($i = 1; $i -le 10; $i++) {
-              $username = "User$i"
-              $userProfilePath = "$usersPath\$username"
-              New-Item -Path $userProfilePath -ItemType Directory -Force | Out-Null
-              Write-Host "Created: $userProfilePath"
-          }
-          
-          # Copy template to all users in parallel using robocopy
-          Write-Host "`nCopying template contents to all users in parallel..."
-          
-          $jobs = @()
-          for ($i = 1; $i -le 10; $i++) {
-              $username = "User$i"
-              $userProfilePath = "$usersPath\$username"
-              
-              # Start parallel copy job
-              $job = Start-Job -ScriptBlock {
-                  param($source, $dest, $user)
-                  
-                  # Use robocopy for faster copying
-                  robocopy $source $dest /E /MT:8 /NFL /NDL /NJH /NJS /NC /NS /NP
-                  
-                  # Set permissions
-                  icacls $dest /grant "${user}:(OI)(CI)F" /T /C /Q | Out-Null
-                  
-                  # Return item count
-                  $count = (Get-ChildItem -Path $dest -Force -Recurse | Measure-Object).Count
-                  return @{User=$user; Count=$count}
-                  
-              } -ArgumentList $templatePath, $userProfilePath, $username
-              
-              $jobs += $job
-              Write-Host "Started copy job for $username"
-          }
-          
-          # Wait for all jobs to complete and show results
-          Write-Host "`nWaiting for all copy jobs to complete..."
-          $results = $jobs | Wait-Job | Receive-Job
-          $jobs | Remove-Job
-          
-          Write-Host "`nCopy Results:"
-          foreach ($result in $results) {
-              Write-Host "  $($result.User): $($result.Count) items copied"
-          }
-          
-          Write-Host "`n=== All profiles created in parallel ==="
+          Write-Host "`nAll users will get custom Default profile on first login!"
 
       - name: Grant Remote Desktop Rights
         run: |
@@ -265,8 +266,9 @@ jobs:
           Write-Host "Users: User1-User10"
           Write-Host "Password: NONE (blank)"
           Write-Host ""
-          Write-Host "All user profiles copied in parallel!"
-          Write-Host "Custom template from Default.rar applied!"
+          Write-Host "C: drive extended (D: merged)"
+          Write-Host "Custom Default profile installed!"
+          Write-Host "Users will get custom profile on first login!"
           Write-Host "========================================`n"
           
           while ($true) {
