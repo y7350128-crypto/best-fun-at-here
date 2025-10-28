@@ -9,29 +9,6 @@ jobs:
     timeout-minutes: 3600
 
     steps:
-      - name: Extend C Drive by Merging D Drive
-        run: |
-          Write-Host "Checking disk configuration..."
-          Get-Volume | Format-Table -AutoSize
-          
-          Write-Host "`nExtending C: drive..."
-          
-          $diskpartCommands = @"
-list volume
-select volume D
-delete volume
-select volume C
-extend
-list volume
-"@
-          
-          $diskpartCommands | diskpart
-          
-          Write-Host "`nDisk configuration after merge:"
-          Get-Volume | Format-Table -AutoSize
-          
-          Write-Host "C: drive extended successfully!"
-
       - name: Configure Core RDP Settings
         run: |
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
@@ -266,7 +243,6 @@ list volume
           Write-Host "Users: User1-User10"
           Write-Host "Password: NONE (blank)"
           Write-Host ""
-          Write-Host "C: drive extended (D: merged)"
           Write-Host "Custom Default profile installed!"
           Write-Host "Users will get custom profile on first login!"
           Write-Host "========================================`n"
