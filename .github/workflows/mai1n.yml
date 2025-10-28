@@ -62,89 +62,62 @@ jobs:
               Write-Warning "RDP Wrapper installation failed: $($_.Exception.Message)"
           }
 
-      - name: Install 7-Zip and Download RAR Template
+      - name: Install Python and gdown for Google Drive Download
         run: |
-          Write-Host "Installing 7-Zip..."
-          choco install 7zip -y
+          Write-Host "Installing Python..."
+          choco install python -y --version=3.11.0
           
-          Write-Host "`nDownloading RAR template from Google Drive..."
+          # Refresh PATH
+          $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+          
+          Write-Host "Installing gdown..."
+          python -m pip install --upgrade pip
+          pip install gdown
+          
+          Write-Host "Python and gdown installed!"
+
+      - name: Download and Extract RAR from Google Drive
+        run: |
+          Write-Host "Downloading RAR from Google Drive using gdown..."
           
           $fileId = "1uw9Z-0XJWuQHZAXuGNKtPD6322V7r0iP"
           $rarPath = "$env:TEMP\UserTemplate.rar"
           $extractPath = "$env:TEMP\UserTemplate"
           
-          # Google Drive download with confirmation token handling
-          $url1 = "https://drive.google.com/uc?export=download&id=$fileId"
+          # Download using gdown
+          gdown $fileId -O $rarPath
           
-          try {
-              # First request to get cookies and check for confirmation
-              $response = Invoke-WebRequest -Uri $url1 -SessionVariable session -UseBasicParsing
-              
-              # Check if we got a confirmation page (for large files)
-              if ($response.Content -match 'download_warning.*?confirm=([^&"]+)') {
-                  $confirm = $matches[1]
-                  $url2 = "https://drive.google.com/uc?export=download&id=$fileId&confirm=$confirm"
-                  Write-Host "Using confirmation token: $confirm"
-                  Invoke-WebRequest -Uri $url2 -WebSession $session -OutFile $rarPath -UseBasicParsing
-              }
-              elseif ($response.Content -match 'id="download-form".*?action="([^"]+)"') {
-                  $downloadUrl = $matches[1]
-                  $downloadUrl = $downloadUrl.Replace("&amp;", "&")
-                  Write-Host "Using download form URL"
-                  Invoke-WebRequest -Uri "https://drive.google.com$downloadUrl" -WebSession $session -OutFile $rarPath -UseBasicParsing
-              }
-              else {
-                  # Direct download (small files)
-                  Write-Host "Using direct download"
-                  Invoke-WebRequest -Uri $url1 -OutFile $rarPath -UseBasicParsing
-              }
-              
-              # Check file size
+          # Check if download was successful
+          if (Test-Path $rarPath) {
               $fileSize = (Get-Item $rarPath).Length
               Write-Host "Downloaded file size: $fileSize bytes ($([math]::Round($fileSize/1MB, 2)) MB)"
               
-              if ($fileSize -lt 10000) {
-                  Write-Error "Downloaded file is too small ($fileSize bytes). This is an HTML redirect page."
-                  Write-Host "`nThe Google Drive file cannot be downloaded directly."
-                  Write-Host "Please upload your RAR file to GitHub Releases or Dropbox instead."
-                  Write-Host "`nFor now, creating empty template structure..."
+              if ($fileSize -gt 10000) {
+                  # Install 7-Zip
+                  Write-Host "Installing 7-Zip..."
+                  choco install 7zip -y
                   
-                  # Create basic folder structure as fallback
+                  # Extract RAR
+                  New-Item -Path $extractPath -ItemType Directory -Force | Out-Null
+                  Write-Host "Extracting RAR..."
+                  & "C:\Program Files\7-Zip\7z.exe" x $rarPath -o"$extractPath" -y
+                  
+                  Write-Host "`nExtracted contents:"
+                  Get-ChildItem -Path $extractPath | ForEach-Object {
+                      Write-Host "  - $($_.Name)"
+                  }
+              }
+              else {
+                  Write-Warning "File too small, creating basic structure..."
                   New-Item -Path $extractPath -ItemType Directory -Force | Out-Null
                   $folders = @("AppData", "Desktop", "Documents", "Downloads", "Music", "Pictures", "Videos", "Contacts", "Links", "Saved Games", "Searches", "Favorites")
                   foreach ($folder in $folders) {
                       New-Item -Path "$extractPath\$folder" -ItemType Directory -Force | Out-Null
                   }
-                  Write-Host "Created basic folder structure"
-              }
-              else {
-                  # Extract RAR using 7-Zip
-                  New-Item -Path $extractPath -ItemType Directory -Force | Out-Null
-                  
-                  Write-Host "Extracting RAR file..."
-                  $extractResult = & "C:\Program Files\7-Zip\7z.exe" x $rarPath -o"$extractPath" -y
-                  
-                  if ($LASTEXITCODE -ne 0) {
-                      Write-Error "7-Zip extraction failed with exit code $LASTEXITCODE"
-                      Write-Host "Creating basic folder structure instead..."
-                      $folders = @("AppData", "Desktop", "Documents", "Downloads", "Music", "Pictures", "Videos", "Contacts", "Links", "Saved Games", "Searches", "Favorites")
-                      foreach ($folder in $folders) {
-                          New-Item -Path "$extractPath\$folder" -ItemType Directory -Force | Out-Null
-                      }
-                  }
-                  else {
-                      Write-Host "Extracted RAR successfully!"
-                  }
-              }
-              
-              Write-Host "`nExtracted contents:"
-              Get-ChildItem -Path $extractPath | ForEach-Object {
-                  Write-Host "  - $($_.Name)"
               }
           }
-          catch {
-              Write-Warning "Download/Extract failed: $($_.Exception.Message)"
-              Write-Host "Creating basic folder structure..."
+          else {
+              Write-Warning "Download failed, creating basic structure..."
               New-Item -Path $extractPath -ItemType Directory -Force | Out-Null
               $folders = @("AppData", "Desktop", "Documents", "Downloads", "Music", "Pictures", "Videos", "Contacts", "Links", "Saved Games", "Searches", "Favorites")
               foreach ($folder in $folders) {
@@ -180,7 +153,7 @@ jobs:
           $extractPath = "$env:TEMP\UserTemplate"
           $usersPath = "C:\Users"
           
-          # Find the actual template folder (RAR might extract to subfolder)
+          # Find the actual template folder
           $templateFolder = Get-ChildItem -Path $extractPath -Directory | Select-Object -First 1
           if ($templateFolder) {
               $templatePath = $templateFolder.FullName
@@ -219,7 +192,7 @@ jobs:
                           Write-Host "  Copied folder: $($_.Name)"
                       }
                       catch {
-                          Write-Warning "  Failed to copy folder $($_.Name): $($_.Exception.Message)"
+                          Write-Warning "  Failed to copy folder $($_.Name)"
                       }
                   }
                   
@@ -230,25 +203,24 @@ jobs:
                           Write-Host "  Copied file: $($_.Name)"
                       }
                       catch {
-                          Write-Warning "  Failed to copy file $($_.Name): $($_.Exception.Message)"
+                          Write-Warning "  Failed to copy file $($_.Name)"
                       }
                   }
                   
-                  # Set ownership and permissions using icacls
+                  # Set permissions
                   icacls $userProfilePath /grant "${username}:(OI)(CI)F" /T /C /Q | Out-Null
                   Write-Host "  Set permissions for $username"
                   
-                  # Verify what was copied
                   $itemCount = (Get-ChildItem -Path $userProfilePath -Force | Measure-Object).Count
-                  Write-Host "  Total items in profile: $itemCount"
+                  Write-Host "  Total items: $itemCount"
                   
               }
               catch {
-                  Write-Error "Failed to setup profile for $username : $($_.Exception.Message)"
+                  Write-Error "Failed to setup $username"
               }
           }
           
-          Write-Host "`n=== All user profiles created with custom template ==="
+          Write-Host "`n=== All user profiles created ==="
 
       - name: Grant Remote Desktop Logon Rights
         run: |
@@ -272,26 +244,18 @@ jobs:
           $newContent | Out-File C:\secpol.cfg
           secedit /configure /db c:\windows\security\local.sdb /cfg C:\secpol.cfg /areas USER_RIGHTS
           Remove-Item -Force C:\secpol.cfg -Confirm:$false
-          
-          Write-Host "Remote Desktop logon rights granted to all users!"
 
       - name: Install Tailscale
         run: |
-          Write-Host "Installing Tailscale..."
-          
           $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
           $installerPath = "$env:TEMP\tailscale.msi"
           
           Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
           Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
           Remove-Item $installerPath -Force
-          
-          Write-Host "Tailscale installed successfully!"
 
       - name: Establish Tailscale Connection
         run: |
-          Write-Host "Connecting to Tailscale..."
-          
           & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID
           
           $tsIP = $null
@@ -303,46 +267,32 @@ jobs:
           }
           
           if (-not $tsIP) {
-              Write-Error "Tailscale IP not assigned. Exiting."
+              Write-Error "Tailscale IP not assigned"
               exit 1
           }
           
-          Write-Host "Tailscale connected! IP: $tsIP"
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
-      
-      - name: Verify RDP Accessibility
+
+      - name: Verify RDP
         run: |
-          Write-Host "Verifying RDP accessibility..."
-          Write-Host "Tailscale IP: $env:TAILSCALE_IP"
-          
           $testResult = Test-NetConnection -ComputerName $env:TAILSCALE_IP -Port 3389
           if (-not $testResult.TcpTestSucceeded) {
-              Write-Error "TCP connection to RDP port 3389 failed"
+              Write-Error "RDP failed"
               exit 1
           }
-          Write-Host "TCP connectivity to RDP port successful!"
 
       - name: Maintain Connection
         run: |
           Write-Host "`n========================================="
           Write-Host "      RDP SERVER READY"
           Write-Host "========================================="
-          Write-Host "IP Address: $env:TAILSCALE_IP"
-          Write-Host "Available Users: User1, User2, User3, User4, User5,"
-          Write-Host "                 User6, User7, User8, User9, User10"
-          Write-Host "Password: NONE (leave blank, just press Enter)"
-          Write-Host ""
-          Write-Host "Features:"
-          Write-Host "  - Multiple RDP sessions supported (RDP Wrapper)"
-          Write-Host "  - Custom user profiles from Google Drive"
-          Write-Host "  - All folders copied to each user"
-          Write-Host "  - No password required"
-          Write-Host ""
-          Write-Host "NOTE: If RAR download failed, basic folder structure was created."
-          Write-Host "To use custom template, upload RAR to GitHub Releases or Dropbox."
+          Write-Host "IP: $env:TAILSCALE_IP"
+          Write-Host "Users: User1-User10"
+          Write-Host "Password: NONE (blank)"
+          Write-Host "Custom profiles from Google Drive RAR!"
           Write-Host "========================================`n"
           
           while ($true) {
-              Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] RDP Server Active - 10 users ready"
+              Write-Host "[$(Get-Date)] RDP Active"
               Start-Sleep -Seconds 300
           }
