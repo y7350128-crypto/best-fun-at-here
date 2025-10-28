@@ -67,28 +67,89 @@ jobs:
           Write-Host "Installing 7-Zip..."
           choco install 7zip -y
           
-          Write-Host "Downloading RAR template from Google Drive..."
+          Write-Host "`nDownloading RAR template from Google Drive..."
           
           $fileId = "1uw9Z-0XJWuQHZAXuGNKtPD6322V7r0iP"
           $rarPath = "$env:TEMP\UserTemplate.rar"
           $extractPath = "$env:TEMP\UserTemplate"
           
-          # Download RAR file
-          curl -L -o $rarPath "https://drive.google.com/uc?export=download&id=$fileId"
+          # Google Drive download with confirmation token handling
+          $url1 = "https://drive.google.com/uc?export=download&id=$fileId"
           
-          Write-Host "Downloaded RAR: $(Get-Item $rarPath).Length bytes"
-          
-          # Create extract directory
-          New-Item -Path $extractPath -ItemType Directory -Force | Out-Null
-          
-          # Extract RAR using 7-Zip
-          & "C:\Program Files\7-Zip\7z.exe" x $rarPath -o"$extractPath" -y
-          
-          Write-Host "Extracted RAR successfully!"
-          
-          Write-Host "`nExtracted contents:"
-          Get-ChildItem -Path $extractPath | ForEach-Object {
-              Write-Host "  - $($_.Name)"
+          try {
+              # First request to get cookies and check for confirmation
+              $response = Invoke-WebRequest -Uri $url1 -SessionVariable session -UseBasicParsing
+              
+              # Check if we got a confirmation page (for large files)
+              if ($response.Content -match 'download_warning.*?confirm=([^&"]+)') {
+                  $confirm = $matches[1]
+                  $url2 = "https://drive.google.com/uc?export=download&id=$fileId&confirm=$confirm"
+                  Write-Host "Using confirmation token: $confirm"
+                  Invoke-WebRequest -Uri $url2 -WebSession $session -OutFile $rarPath -UseBasicParsing
+              }
+              elseif ($response.Content -match 'id="download-form".*?action="([^"]+)"') {
+                  $downloadUrl = $matches[1]
+                  $downloadUrl = $downloadUrl.Replace("&amp;", "&")
+                  Write-Host "Using download form URL"
+                  Invoke-WebRequest -Uri "https://drive.google.com$downloadUrl" -WebSession $session -OutFile $rarPath -UseBasicParsing
+              }
+              else {
+                  # Direct download (small files)
+                  Write-Host "Using direct download"
+                  Invoke-WebRequest -Uri $url1 -OutFile $rarPath -UseBasicParsing
+              }
+              
+              # Check file size
+              $fileSize = (Get-Item $rarPath).Length
+              Write-Host "Downloaded file size: $fileSize bytes ($([math]::Round($fileSize/1MB, 2)) MB)"
+              
+              if ($fileSize -lt 10000) {
+                  Write-Error "Downloaded file is too small ($fileSize bytes). This is an HTML redirect page."
+                  Write-Host "`nThe Google Drive file cannot be downloaded directly."
+                  Write-Host "Please upload your RAR file to GitHub Releases or Dropbox instead."
+                  Write-Host "`nFor now, creating empty template structure..."
+                  
+                  # Create basic folder structure as fallback
+                  New-Item -Path $extractPath -ItemType Directory -Force | Out-Null
+                  $folders = @("AppData", "Desktop", "Documents", "Downloads", "Music", "Pictures", "Videos", "Contacts", "Links", "Saved Games", "Searches", "Favorites")
+                  foreach ($folder in $folders) {
+                      New-Item -Path "$extractPath\$folder" -ItemType Directory -Force | Out-Null
+                  }
+                  Write-Host "Created basic folder structure"
+              }
+              else {
+                  # Extract RAR using 7-Zip
+                  New-Item -Path $extractPath -ItemType Directory -Force | Out-Null
+                  
+                  Write-Host "Extracting RAR file..."
+                  $extractResult = & "C:\Program Files\7-Zip\7z.exe" x $rarPath -o"$extractPath" -y
+                  
+                  if ($LASTEXITCODE -ne 0) {
+                      Write-Error "7-Zip extraction failed with exit code $LASTEXITCODE"
+                      Write-Host "Creating basic folder structure instead..."
+                      $folders = @("AppData", "Desktop", "Documents", "Downloads", "Music", "Pictures", "Videos", "Contacts", "Links", "Saved Games", "Searches", "Favorites")
+                      foreach ($folder in $folders) {
+                          New-Item -Path "$extractPath\$folder" -ItemType Directory -Force | Out-Null
+                      }
+                  }
+                  else {
+                      Write-Host "Extracted RAR successfully!"
+                  }
+              }
+              
+              Write-Host "`nExtracted contents:"
+              Get-ChildItem -Path $extractPath | ForEach-Object {
+                  Write-Host "  - $($_.Name)"
+              }
+          }
+          catch {
+              Write-Warning "Download/Extract failed: $($_.Exception.Message)"
+              Write-Host "Creating basic folder structure..."
+              New-Item -Path $extractPath -ItemType Directory -Force | Out-Null
+              $folders = @("AppData", "Desktop", "Documents", "Downloads", "Music", "Pictures", "Videos", "Contacts", "Links", "Saved Games", "Searches", "Favorites")
+              foreach ($folder in $folders) {
+                  New-Item -Path "$extractPath\$folder" -ItemType Directory -Force | Out-Null
+              }
           }
 
       - name: Create 10 Local Users with No Password
@@ -131,8 +192,12 @@ jobs:
           
           # Show what will be copied
           Write-Host "`nTemplate contents to copy:"
-          Get-ChildItem -Path $templatePath | ForEach-Object {
-              Write-Host "  - $($_.Name) [$($_.PSIsContainer)]"
+          Get-ChildItem -Path $templatePath -Force | ForEach-Object {
+              if ($_.PSIsContainer) {
+                  Write-Host "  - $($_.Name) [Folder]"
+              } else {
+                  Write-Host "  - $($_.Name) [File - $($_.Length) bytes]"
+              }
           }
           
           for ($i = 1; $i -le 10; $i++) {
@@ -170,7 +235,7 @@ jobs:
                   }
                   
                   # Set ownership and permissions using icacls
-                  icacls $userProfilePath /grant "${username}:(OI)(CI)F" /T /C /Q
+                  icacls $userProfilePath /grant "${username}:(OI)(CI)F" /T /C /Q | Out-Null
                   Write-Host "  Set permissions for $username"
                   
                   # Verify what was copied
@@ -269,12 +334,15 @@ jobs:
           Write-Host ""
           Write-Host "Features:"
           Write-Host "  - Multiple RDP sessions supported (RDP Wrapper)"
-          Write-Host "  - Custom user profiles applied from Google Drive"
-          Write-Host "  - All folders and files copied to each user"
+          Write-Host "  - Custom user profiles from Google Drive"
+          Write-Host "  - All folders copied to each user"
           Write-Host "  - No password required"
+          Write-Host ""
+          Write-Host "NOTE: If RAR download failed, basic folder structure was created."
+          Write-Host "To use custom template, upload RAR to GitHub Releases or Dropbox."
           Write-Host "========================================`n"
           
           while ($true) {
-              Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] RDP Server Active - 10 users ready for connection"
+              Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] RDP Server Active - 10 users ready"
               Start-Sleep -Seconds 300
           }
