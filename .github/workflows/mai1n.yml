@@ -45,7 +45,7 @@ jobs:
                   Write-Host "Created user: $username"
               }
               catch {
-                  Write-Warning "Failed to create $username: $_"
+                  Write-Warning "Failed to create ${username}: $($_.Exception.Message)"
               }
           }
           
