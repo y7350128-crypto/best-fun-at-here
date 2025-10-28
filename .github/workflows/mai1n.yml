@@ -9,33 +9,6 @@ jobs:
     timeout-minutes: 3600
 
     steps:
-      - name: Extend C Drive by Merging D Drive
-        run: |
-          Write-Host "Checking disk configuration..."
-          Get-Volume | Format-Table -AutoSize
-          
-          Write-Host "`nExtending C: drive..."
-          
-          # Delete D: drive to create unallocated space
-          $driveLetter = "D"
-          
-          # Use diskpart to remove D drive and extend C
-          $diskpartScript = @"
-          list volume
-          select volume $driveLetter
-          delete volume
-          select volume C
-          extend
-          list volume
-"@
-          
-          $diskpartScript | diskpart
-          
-          Write-Host "`nDisk configuration after merge:"
-          Get-Volume | Format-Table -AutoSize
-          
-          Write-Host "C: drive extended successfully!"
-
       - name: Configure Core RDP Settings
         run: |
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
@@ -157,6 +130,7 @@ jobs:
               $templatePath = $defaultFolder.FullName
               Write-Host "Found Default folder at: $templatePath"
           } else {
+              # If no Default folder, use the first directory
               $firstFolder = Get-ChildItem -Path $extractPath -Directory | Select-Object -First 1
               if ($firstFolder) {
                   $templatePath = $firstFolder.FullName
@@ -166,7 +140,7 @@ jobs:
               }
           }
           
-          # Show template contents
+          # Show template contents (what's INSIDE the Default folder)
           Write-Host "`nContents inside template folder:"
           Get-ChildItem -Path $templatePath -Force | Select-Object -First 20 | ForEach-Object {
               if ($_.PSIsContainer) {
@@ -185,8 +159,8 @@ jobs:
               Write-Host "Created: $userProfilePath"
           }
           
-          # Copy template to all users in parallel
-          Write-Host "`nCopying template to all users in parallel..."
+          # Copy template to all users in parallel using robocopy
+          Write-Host "`nCopying template contents to all users in parallel..."
           
           $jobs = @()
           for ($i = 1; $i -le 10; $i++) {
@@ -213,7 +187,7 @@ jobs:
               Write-Host "Started copy job for $username"
           }
           
-          # Wait for all jobs to complete
+          # Wait for all jobs to complete and show results
           Write-Host "`nWaiting for all copy jobs to complete..."
           $results = $jobs | Wait-Job | Receive-Job
           $jobs | Remove-Job
@@ -291,9 +265,8 @@ jobs:
           Write-Host "Users: User1-User10"
           Write-Host "Password: NONE (blank)"
           Write-Host ""
-          Write-Host "C: drive extended (D: merged into C:)"
           Write-Host "All user profiles copied in parallel!"
-          Write-Host "Custom template from Google Drive RAR!"
+          Write-Host "Custom template from Default.rar applied!"
           Write-Host "========================================`n"
           
           while ($true) {
