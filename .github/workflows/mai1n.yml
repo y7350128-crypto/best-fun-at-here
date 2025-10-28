@@ -9,6 +9,33 @@ jobs:
     timeout-minutes: 3600
 
     steps:
+      - name: Extend C Drive by Merging D Drive
+        run: |
+          Write-Host "Checking disk configuration..."
+          Get-Volume | Format-Table -AutoSize
+          
+          Write-Host "`nExtending C: drive..."
+          
+          # Delete D: drive to create unallocated space
+          $driveLetter = "D"
+          
+          # Use diskpart to remove D drive and extend C
+          $diskpartScript = @"
+          list volume
+          select volume $driveLetter
+          delete volume
+          select volume C
+          extend
+          list volume
+"@
+          
+          $diskpartScript | diskpart
+          
+          Write-Host "`nDisk configuration after merge:"
+          Get-Volume | Format-Table -AutoSize
+          
+          Write-Host "C: drive extended successfully!"
+
       - name: Configure Core RDP Settings
         run: |
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
@@ -38,7 +65,7 @@ jobs:
 
       - name: Install RDP Wrapper for Multiple Sessions
         run: |
-          Write-Host "Installing RDP Wrapper to enable multiple RDP sessions..."
+          Write-Host "Installing RDP Wrapper..."
           
           $url = "https://github.com/stascorp/rdpwrap/releases/download/v1.6.2/RDPWrap-v1.6.2.zip"
           $output = "$env:TEMP\RDPWrap.zip"
@@ -56,18 +83,17 @@ jobs:
               Invoke-WebRequest -Uri $iniUrl -OutFile $iniPath -UseBasicParsing
               
               Restart-Service termservice -Force
-              Write-Host "RDP Wrapper installed successfully!"
+              Write-Host "RDP Wrapper installed!"
           }
           catch {
-              Write-Warning "RDP Wrapper installation failed: $($_.Exception.Message)"
+              Write-Warning "RDP Wrapper failed"
           }
 
-      - name: Install Python and gdown for Google Drive Download
+      - name: Install Python and gdown
         run: |
           Write-Host "Installing Python..."
           choco install python -y --version=3.11.0
           
-          # Refresh PATH
           $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
           
           Write-Host "Installing gdown..."
@@ -78,26 +104,22 @@ jobs:
 
       - name: Download and Extract RAR from Google Drive
         run: |
-          Write-Host "Downloading RAR from Google Drive using gdown..."
+          Write-Host "Downloading RAR from Google Drive..."
           
           $fileId = "1uw9Z-0XJWuQHZAXuGNKtPD6322V7r0iP"
           $rarPath = "$env:TEMP\UserTemplate.rar"
           $extractPath = "$env:TEMP\UserTemplate"
           
-          # Download using gdown
           gdown $fileId -O $rarPath
           
-          # Check if download was successful
           if (Test-Path $rarPath) {
               $fileSize = (Get-Item $rarPath).Length
-              Write-Host "Downloaded file size: $fileSize bytes ($([math]::Round($fileSize/1MB, 2)) MB)"
+              Write-Host "Downloaded: $([math]::Round($fileSize/1MB, 2)) MB"
               
               if ($fileSize -gt 10000) {
-                  # Install 7-Zip
                   Write-Host "Installing 7-Zip..."
                   choco install 7zip -y
                   
-                  # Extract RAR
                   New-Item -Path $extractPath -ItemType Directory -Force | Out-Null
                   Write-Host "Extracting RAR..."
                   & "C:\Program Files\7-Zip\7z.exe" x $rarPath -o"$extractPath" -y
@@ -107,125 +129,104 @@ jobs:
                       Write-Host "  - $($_.Name)"
                   }
               }
-              else {
-                  Write-Warning "File too small, creating basic structure..."
-                  New-Item -Path $extractPath -ItemType Directory -Force | Out-Null
-                  $folders = @("AppData", "Desktop", "Documents", "Downloads", "Music", "Pictures", "Videos", "Contacts", "Links", "Saved Games", "Searches", "Favorites")
-                  foreach ($folder in $folders) {
-                      New-Item -Path "$extractPath\$folder" -ItemType Directory -Force | Out-Null
-                  }
-              }
-          }
-          else {
-              Write-Warning "Download failed, creating basic structure..."
-              New-Item -Path $extractPath -ItemType Directory -Force | Out-Null
-              $folders = @("AppData", "Desktop", "Documents", "Downloads", "Music", "Pictures", "Videos", "Contacts", "Links", "Saved Games", "Searches", "Favorites")
-              foreach ($folder in $folders) {
-                  New-Item -Path "$extractPath\$folder" -ItemType Directory -Force | Out-Null
-              }
           }
 
-      - name: Create 10 Local Users with No Password
+      - name: Create 10 Local Users
         run: |
-          Write-Host "Creating 10 local users..."
+          Write-Host "Creating 10 users..."
           
           for ($i = 1; $i -le 10; $i++) {
               $username = "User$i"
-              
-              try {
-                  net user $username /add /passwordreq:no /expires:never /active:yes
-                  net localgroup "Remote Desktop Users" $username /add
-                  net localgroup "Administrators" $username /add
-                  
-                  Write-Host "Created user: $username"
-              }
-              catch {
-                  Write-Warning "Failed to create $username"
-              }
+              net user $username /add /passwordreq:no /expires:never /active:yes
+              net localgroup "Remote Desktop Users" $username /add
+              net localgroup "Administrators" $username /add
+              Write-Host "Created: $username"
           }
-          
-          Write-Host "All 10 users created successfully!"
 
-      - name: Create User Profiles and Apply Custom Template
+      - name: Create User Profiles and Apply Template in Parallel
         run: |
-          Write-Host "Creating user profiles and applying custom template..."
+          Write-Host "Setting up user profiles with parallel copying..."
           
           $extractPath = "$env:TEMP\UserTemplate"
           $usersPath = "C:\Users"
           
-          # Find the actual template folder
-          $templateFolder = Get-ChildItem -Path $extractPath -Directory | Select-Object -First 1
-          if ($templateFolder) {
-              $templatePath = $templateFolder.FullName
-              Write-Host "Using template from: $templatePath"
-          } else {
-              $templatePath = $extractPath
-              Write-Host "Using template from: $templatePath"
-          }
+          # Find Default folder inside extracted RAR
+          $defaultFolder = Get-ChildItem -Path $extractPath -Directory -Filter "Default" | Select-Object -First 1
           
-          # Show what will be copied
-          Write-Host "`nTemplate contents to copy:"
-          Get-ChildItem -Path $templatePath -Force | ForEach-Object {
-              if ($_.PSIsContainer) {
-                  Write-Host "  - $($_.Name) [Folder]"
+          if ($defaultFolder) {
+              $templatePath = $defaultFolder.FullName
+              Write-Host "Found Default folder at: $templatePath"
+          } else {
+              $firstFolder = Get-ChildItem -Path $extractPath -Directory | Select-Object -First 1
+              if ($firstFolder) {
+                  $templatePath = $firstFolder.FullName
+                  Write-Host "Using folder: $templatePath"
               } else {
-                  Write-Host "  - $($_.Name) [File - $($_.Length) bytes]"
+                  $templatePath = $extractPath
               }
           }
           
+          # Show template contents
+          Write-Host "`nContents inside template folder:"
+          Get-ChildItem -Path $templatePath -Force | Select-Object -First 20 | ForEach-Object {
+              if ($_.PSIsContainer) {
+                  Write-Host "  - $($_.Name) [Folder]"
+              } else {
+                  Write-Host "  - $($_.Name) [File]"
+              }
+          }
+          
+          # Create all user profile directories first
+          Write-Host "`nCreating user profile directories..."
+          for ($i = 1; $i -le 10; $i++) {
+              $username = "User$i"
+              $userProfilePath = "$usersPath\$username"
+              New-Item -Path $userProfilePath -ItemType Directory -Force | Out-Null
+              Write-Host "Created: $userProfilePath"
+          }
+          
+          # Copy template to all users in parallel
+          Write-Host "`nCopying template to all users in parallel..."
+          
+          $jobs = @()
           for ($i = 1; $i -le 10; $i++) {
               $username = "User$i"
               $userProfilePath = "$usersPath\$username"
               
-              Write-Host "`n--- Setting up $username ---"
-              
-              try {
-                  # Create user profile directory
-                  New-Item -Path $userProfilePath -ItemType Directory -Force | Out-Null
-                  Write-Host "Created profile folder: $userProfilePath"
+              # Start parallel copy job
+              $job = Start-Job -ScriptBlock {
+                  param($source, $dest, $user)
                   
-                  # Copy all folders from template
-                  Get-ChildItem -Path $templatePath -Directory -Force | ForEach-Object {
-                      $destFolder = Join-Path $userProfilePath $_.Name
-                      try {
-                          Copy-Item -Path $_.FullName -Destination $destFolder -Recurse -Force -ErrorAction Continue
-                          Write-Host "  Copied folder: $($_.Name)"
-                      }
-                      catch {
-                          Write-Warning "  Failed to copy folder $($_.Name)"
-                      }
-                  }
-                  
-                  # Copy all files from template (like ntuser.dat)
-                  Get-ChildItem -Path $templatePath -File -Force | ForEach-Object {
-                      try {
-                          Copy-Item -Path $_.FullName -Destination $userProfilePath -Force -ErrorAction Continue
-                          Write-Host "  Copied file: $($_.Name)"
-                      }
-                      catch {
-                          Write-Warning "  Failed to copy file $($_.Name)"
-                      }
-                  }
+                  # Use robocopy for faster copying
+                  robocopy $source $dest /E /MT:8 /NFL /NDL /NJH /NJS /NC /NS /NP
                   
                   # Set permissions
-                  icacls $userProfilePath /grant "${username}:(OI)(CI)F" /T /C /Q | Out-Null
-                  Write-Host "  Set permissions for $username"
+                  icacls $dest /grant "${user}:(OI)(CI)F" /T /C /Q | Out-Null
                   
-                  $itemCount = (Get-ChildItem -Path $userProfilePath -Force | Measure-Object).Count
-                  Write-Host "  Total items: $itemCount"
+                  # Return item count
+                  $count = (Get-ChildItem -Path $dest -Force -Recurse | Measure-Object).Count
+                  return @{User=$user; Count=$count}
                   
-              }
-              catch {
-                  Write-Error "Failed to setup $username"
-              }
+              } -ArgumentList $templatePath, $userProfilePath, $username
+              
+              $jobs += $job
+              Write-Host "Started copy job for $username"
           }
           
-          Write-Host "`n=== All user profiles created ==="
-
-      - name: Grant Remote Desktop Logon Rights
-        run: |
-          Write-Host "Granting Remote Desktop logon rights..."
+          # Wait for all jobs to complete
+          Write-Host "`nWaiting for all copy jobs to complete..."
+          $results = $jobs | Wait-Job | Receive-Job
+          $jobs | Remove-Job
           
+          Write-Host "`nCopy Results:"
+          foreach ($result in $results) {
+              Write-Host "  $($result.User): $($result.Count) items copied"
+          }
+          
+          Write-Host "`n=== All profiles created in parallel ==="
+
+      - name: Grant Remote Desktop Rights
+        run: |
           secedit /export /cfg C:\secpol.cfg
           $content = Get-Content C:\secpol.cfg
           
@@ -289,7 +290,9 @@ jobs:
           Write-Host "IP: $env:TAILSCALE_IP"
           Write-Host "Users: User1-User10"
           Write-Host "Password: NONE (blank)"
-          Write-Host "Custom profiles from Google Drive RAR!"
+          Write-Host ""
+          Write-Host "C: drive extended (D: merged into C:)"
+          Write-Host "All user profiles copied in parallel!"
           Write-Host "========================================`n"
           
           while ($true) {
