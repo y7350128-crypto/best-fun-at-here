@@ -293,6 +293,7 @@ jobs:
           Write-Host ""
           Write-Host "C: drive extended (D: merged into C:)"
           Write-Host "All user profiles copied in parallel!"
+          Write-Host "Custom template from Google Drive RAR!"
           Write-Host "========================================`n"
           
           while ($true) {
