@@ -24,38 +24,46 @@ jobs:
 
           Restart-Service -Name TermService -Force
 
-      - name: Create 10 Local Users with Password "1"
+      - name: Disable Password Complexity and Allow Blank Passwords
         run: |
-          Write-Host "Creating 10 local user accounts with password '1'..."
+          # Disable password complexity requirements
+          secedit /export /cfg C:\secpol.cfg
+          (Get-Content C:\secpol.cfg).replace("PasswordComplexity = 1", "PasswordComplexity = 0") | Out-File C:\secpol.cfg
+          (Get-Content C:\secpol.cfg).replace("MinimumPasswordLength = 7", "MinimumPasswordLength = 0") | Out-File C:\secpol.cfg
+          secedit /configure /db c:\windows\security\local.sdb /cfg C:\secpol.cfg /areas SECURITYPOLICY
+          Remove-Item -Force C:\secpol.cfg -Confirm:$false
           
-          # Create password as SecureString
-          $password = ConvertTo-SecureString "1" -AsPlainText -Force
+          # Allow blank passwords for RDP
+          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name "LimitBlankPasswordUse" -Value 0 -Force
+          
+          Write-Host "Disabled password complexity and enabled blank passwords"
+
+      - name: Create 10 Local Users with No Password
+        run: |
+          Write-Host "Creating 10 local user accounts with no password..."
           
           for ($i = 1; $i -le 10; $i++) {
               $username = "User$i"
               
               try {
-                  # Create user with password
-                  New-LocalUser -Name $username -Password $password -AccountNeverExpires -PasswordNeverExpires -Description "User account $i" -ErrorAction Stop | Out-Null
+                  # Create user with no password using net user command (more reliable for blank passwords)
+                  net user $username /add /passwordreq:no /expires:never /active:yes
                   
-                  # Disable "User must change password at next logon" using ADSI
-                  $user = [ADSI]"WinNT://./$username,user"
-                  $user.UserFlags.value = $user.UserFlags.value -bor 0x10000
-                  $user.PasswordExpired = 0
-                  $user.SetInfo()
+                  # Set password to never expire and user doesn't need to change it
+                  wmic useraccount where name="$username" set PasswordExpires=false
                   
                   # Add to groups
-                  Add-LocalGroupMember -Group "Remote Desktop Users" -Member $username -ErrorAction SilentlyContinue
-                  Add-LocalGroupMember -Group "Administrators" -Member $username -ErrorAction SilentlyContinue
+                  net localgroup "Remote Desktop Users" $username /add
+                  net localgroup "Administrators" $username /add
                   
-                  Write-Host "Created user: $username"
+                  Write-Host "Created user: $username (no password)"
               }
               catch {
                   Write-Warning "Failed to create ${username}: $($_.Exception.Message)"
               }
           }
           
-          Write-Host "`nAll 10 users created successfully!"
+          Write-Host "`nAll 10 users created successfully with NO password!"
 
       - name: Install Tailscale
         run: |
@@ -105,7 +113,7 @@ jobs:
           Write-Host "  User1, User2, User3, User4, User5"
           Write-Host "  User6, User7, User8, User9, User10"
           Write-Host ""
-          Write-Host "Password: 1"
+          Write-Host "Password: NONE (leave blank, just click Sign in)"
           Write-Host "========================================`n"
           
           while ($true) {
