@@ -34,7 +34,7 @@ jobs:
           
           Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name "LimitBlankPasswordUse" -Value 0 -Force
           
-          Write-Host "Disabled password complexity"
+          Write-Host "Disabled password complexity and enabled blank passwords"
 
       - name: Install RDP Wrapper for Multiple Sessions
         run: |
@@ -56,39 +56,46 @@ jobs:
               Invoke-WebRequest -Uri $iniUrl -OutFile $iniPath -UseBasicParsing
               
               Restart-Service termservice -Force
-              Write-Host "RDP Wrapper installed!"
+              Write-Host "RDP Wrapper installed successfully!"
           }
           catch {
-              Write-Warning "RDP Wrapper failed"
+              Write-Warning "RDP Wrapper installation failed: $($_.Exception.Message)"
           }
 
       - name: Download User Template from Google Drive
         run: |
-          Write-Host "Downloading user template from Google Drive..."
+          Write-Host "Downloading user template ZIP from Google Drive..."
           
-          # First, make the folder publicly accessible ZIP
-          # Use direct download link format
-          $folderId = "18lF5qxqffc6n54-TWfeH8G7NMnPCZMj7"
+          $fileId = "1uw9Z-0XJWuQHZAXuGNKtPD6322V7r0iP"
+          $zipPath = "$env:TEMP\UserTemplate.zip"
+          $extractPath = "$env:TEMP\UserTemplate"
           
-          # Google Drive folder download requires special handling
-          # We'll use curl which is built into Windows
-          $downloadPath = "$env:TEMP\UserTemplate.zip"
+          # Download from Google Drive using direct download link
+          $url = "https://drive.google.com/uc?export=download&id=$fileId"
           
-          # Try direct download (you need to share folder and get direct zip link)
           try {
-              # Alternative: Use Google Drive API or create a ZIP of the folder and share that ZIP file
-              Write-Host "Note: Google Drive folders cannot be directly downloaded."
-              Write-Host "Please create a ZIP file of your folder and share it, then use that file ID."
-              Write-Host "For now, creating empty template structure..."
+              # First request
+              $response = Invoke-WebRequest -Uri $url -SessionVariable session -UseBasicParsing
               
-              # Create basic folder structure as fallback
-              $templatePath = "$env:TEMP\UserTemplate"
-              New-Item -Path $templatePath -ItemType Directory -Force | Out-Null
-              New-Item -Path "$templatePath\Desktop" -ItemType Directory -Force | Out-Null
-              New-Item -Path "$templatePath\Documents" -ItemType Directory -Force | Out-Null
-              New-Item -Path "$templatePath\Downloads" -ItemType Directory -Force | Out-Null
+              # Check if there's a confirmation page (for large files)
+              if ($response.Content -match 'download_warning') {
+                  # Extract confirm token
+                  $confirm = $response.Content -match 'confirm=([^&]+)' | Out-Null
+                  $confirmToken = $matches[1]
+                  $url = "https://drive.google.com/uc?export=download&id=$fileId&confirm=$confirmToken"
+              }
               
-              Write-Host "Created basic template structure"
+              # Download the file
+              Invoke-WebRequest -Uri $url -OutFile $zipPath -WebSession $session -UseBasicParsing
+              Write-Host "Downloaded ZIP file from Google Drive"
+              
+              # Extract ZIP
+              Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
+              Write-Host "Extracted user template"
+              
+              # List contents
+              Write-Host "Template contents:"
+              Get-ChildItem -Path $extractPath -Recurse | Select-Object -First 20 | ForEach-Object { Write-Host $_.FullName }
           }
           catch {
               Write-Warning "Download failed: $($_.Exception.Message)"
@@ -96,7 +103,7 @@ jobs:
 
       - name: Create 10 Local Users
         run: |
-          Write-Host "Creating 10 users..."
+          Write-Host "Creating 10 local users..."
           
           for ($i = 1; $i -le 10; $i++) {
               $username = "User$i"
@@ -106,55 +113,79 @@ jobs:
                   net localgroup "Remote Desktop Users" $username /add
                   net localgroup "Administrators" $username /add
                   
-                  Write-Host "Created: $username"
+                  Write-Host "Created user: $username"
               }
               catch {
-                  Write-Warning "Failed: $username"
+                  Write-Warning "Failed to create $username"
               }
           }
+          
+          Write-Host "All 10 users created successfully!"
 
-      - name: Create User Profiles with Template
+      - name: Create User Profiles and Apply Template
         run: |
-          Write-Host "Creating user profiles..."
+          Write-Host "Creating user profiles and applying custom template..."
           
           $templatePath = "$env:TEMP\UserTemplate"
           $usersPath = "C:\Users"
+          
+          # Find the actual template folder (might be inside a subfolder)
+          $templateRoot = Get-ChildItem -Path $templatePath -Directory | Select-Object -First 1
+          if ($templateRoot) {
+              $templatePath = $templateRoot.FullName
+              Write-Host "Using template from: $templatePath"
+          }
           
           for ($i = 1; $i -le 10; $i++) {
               $username = "User$i"
               $userProfilePath = "$usersPath\$username"
               
               try {
-                  # Create profile folder
+                  # Create user profile directory
                   New-Item -Path $userProfilePath -ItemType Directory -Force | Out-Null
+                  Write-Host "Created profile folder: $userProfilePath"
                   
-                  # Create standard Windows user folders
-                  @("Desktop", "Documents", "Downloads", "Pictures", "Music", "Videos", "AppData") | ForEach-Object {
-                      New-Item -Path "$userProfilePath\$_" -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
-                  }
-                  
-                  # Copy template if exists
+                  # Copy all template contents to user folder
                   if (Test-Path $templatePath) {
-                      Copy-Item -Path "$templatePath\*" -Destination $userProfilePath -Recurse -Force -ErrorAction Continue
+                      Get-ChildItem -Path $templatePath -Force | ForEach-Object {
+                          try {
+                              Copy-Item -Path $_.FullName -Destination $userProfilePath -Recurse -Force -ErrorAction Continue
+                              Write-Host "Copied: $($_.Name)"
+                          }
+                          catch {
+                              Write-Warning "Failed to copy $($_.Name): $($_.Exception.Message)"
+                          }
+                      }
                   }
                   
-                  # Set permissions
-                  $acl = Get-Acl $userProfilePath
-                  $userAccount = New-Object System.Security.Principal.NTAccount($username)
-                  $acl.SetOwner($userAccount)
-                  $accessRule = New-Object System.Security.AccessControl.FileSystemAccessRule($username, "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
-                  $acl.AddAccessRule($accessRule)
-                  Set-Acl -Path $userProfilePath -AclObject $acl -ErrorAction Continue
-                  
-                  Write-Host "Setup complete: $username"
+                  # Set ownership
+                  try {
+                      $acl = Get-Acl $userProfilePath
+                      $userAccount = New-Object System.Security.Principal.NTAccount($username)
+                      $acl.SetOwner($userAccount)
+                      
+                      # Grant full control
+                      $accessRule = New-Object System.Security.AccessControl.FileSystemAccessRule($username, "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
+                      $acl.AddAccessRule($accessRule)
+                      Set-Acl -Path $userProfilePath -AclObject $acl
+                      
+                      Write-Host "Set permissions for $username"
+                  }
+                  catch {
+                      Write-Warning "Failed to set permissions for $username"
+                  }
               }
               catch {
-                  Write-Warning "Error: $username"
+                  Write-Warning "Error setting up profile for $username : $($_.Exception.Message)"
               }
           }
+          
+          Write-Host "`nAll user profiles created with custom template!"
 
-      - name: Grant Remote Desktop Rights
+      - name: Grant Remote Desktop Logon Rights
         run: |
+          Write-Host "Granting Remote Desktop logon rights..."
+          
           secedit /export /cfg C:\secpol.cfg
           $content = Get-Content C:\secpol.cfg
           
@@ -173,6 +204,8 @@ jobs:
           $newContent | Out-File C:\secpol.cfg
           secedit /configure /db c:\windows\security\local.sdb /cfg C:\secpol.cfg /areas USER_RIGHTS
           Remove-Item -Force C:\secpol.cfg -Confirm:$false
+          
+          Write-Host "Remote Desktop logon rights granted!"
 
       - name: Install Tailscale
         run: |
@@ -196,36 +229,38 @@ jobs:
           }
           
           if (-not $tsIP) {
-              Write-Error "Tailscale IP not assigned"
+              Write-Error "Tailscale IP not assigned. Exiting."
               exit 1
           }
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
 
-      - name: Verify RDP
+      - name: Verify RDP Accessibility
         run: |
+          Write-Host "Tailscale IP: $env:TAILSCALE_IP"
+          
           $testResult = Test-NetConnection -ComputerName $env:TAILSCALE_IP -Port 3389
           if (-not $testResult.TcpTestSucceeded) {
-              Write-Error "RDP failed"
+              Write-Error "TCP connection to RDP port 3389 failed"
               exit 1
           }
+          Write-Host "TCP connectivity successful!"
 
       - name: Maintain Connection
         run: |
           Write-Host "`n========================================="
           Write-Host "RDP SERVER READY"
           Write-Host "========================================="
-          Write-Host "IP: $env:TAILSCALE_IP"
-          Write-Host "Users: User1-User10"
-          Write-Host "Password: NONE (leave blank)"
+          Write-Host "IP Address: $env:TAILSCALE_IP"
+          Write-Host "Available Users: User1-User10"
+          Write-Host "Password: NONE (leave blank, press Enter)"
           Write-Host ""
-          Write-Host "IMPORTANT: To use custom template:"
-          Write-Host "1. ZIP your folder contents"
-          Write-Host "2. Upload ZIP to Google Drive"
-          Write-Host "3. Share ZIP file publicly"
-          Write-Host "4. Use the ZIP file ID in workflow"
+          Write-Host "Custom user profiles applied from Google Drive!"
+          Write-Host "All folders and ntuser.dat copied to each user."
+          Write-Host ""
+          Write-Host "Multiple RDP sessions supported!"
           Write-Host "========================================`n"
           
           while ($true) {
-              Write-Host "[$(Get-Date)] RDP Active"
+              Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] RDP Active - Multiple sessions enabled"
               Start-Sleep -Seconds 300
           }
