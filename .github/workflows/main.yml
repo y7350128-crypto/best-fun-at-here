@@ -24,6 +24,13 @@ jobs:
 
           Restart-Service -Name TermService -Force
 
+      - name: Allow Blank Passwords for RDP
+        run: |
+          # Allow RDP connections with blank passwords
+          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' `
+                           -Name "LimitBlankPasswordUse" -Value 0 -Force
+          Write-Host "Enabled blank password RDP access"
+
       - name: Create 10 Local Users Without Passwords
         run: |
           Write-Host "Creating 10 local user accounts without passwords..."
@@ -44,8 +51,6 @@ jobs:
           }
           
           Write-Host "`nAll 10 users created successfully!"
-          Write-Host "Usernames: User1, User2, User3, User4, User5, User6, User7, User8, User9, User10"
-          Write-Host "Passwords: None (blank)"
 
       - name: Install Tailscale
         run: |
@@ -91,8 +96,11 @@ jobs:
           Write-Host "RDP SERVER READY"
           Write-Host "========================================="
           Write-Host "Address: $env:TAILSCALE_IP"
-          Write-Host "Available Users: User1, User2, User3, User4, User5, User6, User7, User8, User9, User10"
-          Write-Host "Password: (Leave blank - no password)"
+          Write-Host "Available Users:"
+          Write-Host "  User1, User2, User3, User4, User5"
+          Write-Host "  User6, User7, User8, User9, User10"
+          Write-Host ""
+          Write-Host "Password: (Leave blank - just press Enter)"
           Write-Host "========================================`n"
           
           while ($true) {
