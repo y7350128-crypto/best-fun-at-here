@@ -26,7 +26,6 @@ jobs:
 
       - name: Allow Blank Passwords for RDP
         run: |
-          # Allow RDP connections with blank passwords
           Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' `
                            -Name "LimitBlankPasswordUse" -Value 0 -Force
           Write-Host "Enabled blank password RDP access"
