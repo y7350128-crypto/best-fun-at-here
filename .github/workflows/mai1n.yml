@@ -24,7 +24,7 @@ jobs:
 
           Restart-Service -Name TermService -Force
 
-      - name: Disable Password Complexity and Allow Blank Passwords
+      - name: Disable Password Complexity
         run: |
           secedit /export /cfg C:\secpol.cfg
           (Get-Content C:\secpol.cfg).replace("PasswordComplexity = 1", "PasswordComplexity = 0") | Out-File C:\secpol.cfg
@@ -32,9 +32,7 @@ jobs:
           secedit /configure /db c:\windows\security\local.sdb /cfg C:\secpol.cfg /areas SECURITYPOLICY
           Remove-Item -Force C:\secpol.cfg -Confirm:$false
           
-          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name "LimitBlankPasswordUse" -Value 0 -Force
-          
-          Write-Host "Disabled password complexity and enabled blank passwords"
+          Write-Host "Disabled password complexity"
 
       - name: Install RDP Wrapper for Multiple Sessions
         run: |
@@ -49,47 +47,43 @@ jobs:
               
               cd "$env:TEMP\RDPWrap"
               
-              # Run install.bat
               cmd /c install.bat
               
               Start-Sleep -Seconds 5
               
-              # Update rdpwrap.ini for latest Windows version
               $iniUrl = "https://raw.githubusercontent.com/sebaxakerhtc/rdpwrap.ini/master/rdpwrap.ini"
               $iniPath = "C:\Program Files\RDP Wrapper\rdpwrap.ini"
               Invoke-WebRequest -Uri $iniUrl -OutFile $iniPath -UseBasicParsing
               
-              # Restart RDP Wrapper service
               Restart-Service termservice -Force
               
               Write-Host "RDP Wrapper installed successfully!"
-              Write-Host "Multiple concurrent RDP sessions are now enabled!"
           }
           catch {
               Write-Warning "RDP Wrapper installation failed: $($_.Exception.Message)"
               Write-Host "Continuing without RDP Wrapper..."
           }
 
-      - name: Create 10 Local Users with No Password
+      - name: Create 10 Local Users with Password "1"
         run: |
-          Write-Host "Creating 10 local user accounts with no password..."
+          Write-Host "Creating 10 local user accounts with password '1'..."
           
           for ($i = 1; $i -le 10; $i++) {
               $username = "User$i"
               
               try {
-                  net user $username /add /passwordreq:no /expires:never /active:yes
+                  net user $username 1 /add /expires:never /active:yes /passwordchg:no
                   net localgroup "Remote Desktop Users" $username /add
                   net localgroup "Administrators" $username /add
                   
-                  Write-Host "Created user: $username (no password)"
+                  Write-Host "Created user: $username (password: 1)"
               }
               catch {
                   Write-Warning "Failed to create ${username}: $($_.Exception.Message)"
               }
           }
           
-          Write-Host "`nAll 10 users created successfully!"
+          Write-Host "`nAll 10 users created with password: 1"
 
       - name: Grant Remote Desktop Logon Rights
         run: |
@@ -117,7 +111,7 @@ jobs:
           
           Remove-Item -Force C:\secpol.cfg -Confirm:$false
           
-          Write-Host "Remote Desktop logon rights granted to all users!"
+          Write-Host "Remote Desktop logon rights granted!"
 
       - name: Install Tailscale
         run: |
@@ -167,11 +161,9 @@ jobs:
           Write-Host "  User1, User2, User3, User4, User5"
           Write-Host "  User6, User7, User8, User9, User10"
           Write-Host ""
-          Write-Host "Password: NONE (leave blank)"
+          Write-Host "Password: 1"
           Write-Host ""
-          Write-Host "IMPORTANT: RDP Wrapper installed!"
-          Write-Host "You can now connect MULTIPLE users simultaneously."
-          Write-Host "Open separate RDP windows for each user."
+          Write-Host "Multiple users can connect simultaneously!"
           Write-Host "========================================`n"
           
           while ($true) {
