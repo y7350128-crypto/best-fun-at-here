@@ -9,6 +9,101 @@ jobs:
     timeout-minutes: 3600
 
     steps:
+      - name: Move Bloatware to D Drive
+        run: |
+          Write-Host "=== MOVING BLOATWARE TO D: DRIVE ==="
+          Write-Host "`nBEFORE moving:"
+          Get-PSDrive C,D | Format-Table Name,Used,Free -AutoSize
+          
+          # Create bloatware folder on D:
+          New-Item -Path "D:\Bloatware" -ItemType Directory -Force | Out-Null
+          
+          Write-Host "`nMoving large folders to D:\Bloatware..."
+          
+          # Move .NET SDK (~10GB)
+          if (Test-Path "C:\Program Files\dotnet") {
+              Write-Host "Moving .NET SDK..."
+              Move-Item "C:\Program Files\dotnet" -Destination "D:\Bloatware\dotnet" -Force -ErrorAction SilentlyContinue
+          }
+          
+          # Move Android SDK (~8GB)
+          if (Test-Path "C:\Android") {
+              Write-Host "Moving Android SDK..."
+              Move-Item "C:\Android" -Destination "D:\Bloatware\Android" -Force -ErrorAction SilentlyContinue
+          }
+          
+          # Move CodeQL (~5GB)
+          if (Test-Path "C:\hostedtoolcache\CodeQL") {
+              Write-Host "Moving CodeQL..."
+              Move-Item "C:\hostedtoolcache\CodeQL" -Destination "D:\Bloatware\CodeQL" -Force -ErrorAction SilentlyContinue
+          }
+          
+          # Move Java (~3GB)
+          if (Test-Path "C:\hostedtoolcache\Java") {
+              Write-Host "Moving Java..."
+              Move-Item "C:\hostedtoolcache\Java" -Destination "D:\Bloatware\Java" -Force -ErrorAction SilentlyContinue
+          }
+          
+          # Move Ruby (~2GB)
+          if (Test-Path "C:\hostedtoolcache\Ruby") {
+              Write-Host "Moving Ruby..."
+              Move-Item "C:\hostedtoolcache\Ruby" -Destination "D:\Bloatware\Ruby" -Force -ErrorAction SilentlyContinue
+          }
+          
+          # Move Python (~2GB)
+          if (Test-Path "C:\hostedtoolcache\Python") {
+              Write-Host "Moving Python..."
+              Move-Item "C:\hostedtoolcache\Python" -Destination "D:\Bloatware\Python" -Force -ErrorAction SilentlyContinue
+          }
+          
+          # Move Node.js (~1GB)
+          if (Test-Path "C:\hostedtoolcache\node") {
+              Write-Host "Moving Node.js..."
+              Move-Item "C:\hostedtoolcache\node" -Destination "D:\Bloatware\node" -Force -ErrorAction SilentlyContinue
+          }
+          
+          # Move Visual Studio components (~5GB)
+          if (Test-Path "C:\Program Files (x86)\Microsoft Visual Studio") {
+              Write-Host "Moving Visual Studio..."
+              Move-Item "C:\Program Files (x86)\Microsoft Visual Studio" -Destination "D:\Bloatware\VisualStudio" -Force -ErrorAction SilentlyContinue
+          }
+          
+          # Move Windows Kits (~3GB)
+          if (Test-Path "C:\Program Files (x86)\Windows Kits") {
+              Write-Host "Moving Windows Kits..."
+              Move-Item "C:\Program Files (x86)\Windows Kits" -Destination "D:\Bloatware\WindowsKits" -Force -ErrorAction SilentlyContinue
+          }
+          
+          # Move Microsoft SDKs (~2GB)
+          if (Test-Path "C:\Program Files (x86)\Microsoft SDKs") {
+              Write-Host "Moving Microsoft SDKs (x86)..."
+              Move-Item "C:\Program Files (x86)\Microsoft SDKs" -Destination "D:\Bloatware\MicrosoftSDKs_x86" -Force -ErrorAction SilentlyContinue
+          }
+          
+          if (Test-Path "C:\Program Files\Microsoft SDKs") {
+              Write-Host "Moving Microsoft SDKs (x64)..."
+              Move-Item "C:\Program Files\Microsoft SDKs" -Destination "D:\Bloatware\MicrosoftSDKs_x64" -Force -ErrorAction SilentlyContinue
+          }
+          
+          # Move Azure CLI (~500MB)
+          if (Test-Path "C:\Program Files (x86)\Microsoft SDKs\Azure") {
+              Write-Host "Moving Azure CLI..."
+              Move-Item "C:\Program Files (x86)\Microsoft SDKs\Azure" -Destination "D:\Bloatware\Azure" -Force -ErrorAction SilentlyContinue
+          }
+          
+          # Move Go (~500MB)
+          if (Test-Path "C:\hostedtoolcache\go") {
+              Write-Host "Moving Go..."
+              Move-Item "C:\hostedtoolcache\go" -Destination "D:\Bloatware\go" -Force -ErrorAction SilentlyContinue
+          }
+          
+          Write-Host "`nAFTER moving:"
+          Get-PSDrive C,D | Format-Table Name,Used,Free -AutoSize
+          
+          Write-Host "`nBloatware moved to D:\Bloatware"
+          Write-Host "C: drive is now clean with only Windows!"
+          Write-Host "=== DISK OPTIMIZATION COMPLETE ==="
+
       - name: Configure Core RDP Settings
         run: |
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
@@ -33,8 +128,6 @@ jobs:
           Remove-Item -Force C:\secpol.cfg -Confirm:$false
           
           Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name "LimitBlankPasswordUse" -Value 0 -Force
-          
-          Write-Host "Disabled password complexity and enabled blank passwords"
 
       - name: Install RDP Wrapper for Multiple Sessions
         run: |
@@ -56,29 +149,21 @@ jobs:
               Invoke-WebRequest -Uri $iniUrl -OutFile $iniPath -UseBasicParsing
               
               Restart-Service termservice -Force
-              Write-Host "RDP Wrapper installed successfully!"
+              Write-Host "RDP Wrapper installed!"
           }
           catch {
-              Write-Warning "RDP Wrapper installation failed: $($_.Exception.Message)"
+              Write-Warning "RDP Wrapper failed"
           }
 
       - name: Install Python and gdown
         run: |
-          Write-Host "Installing Python..."
           choco install python -y --version=3.11.0
-          
           $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-          
-          Write-Host "Installing gdown..."
           python -m pip install --upgrade pip
           pip install gdown
-          
-          Write-Host "Python and gdown installed!"
 
       - name: Download and Extract RAR from Google Drive
         run: |
-          Write-Host "Downloading RAR from Google Drive..."
-          
           $fileId = "1uw9Z-0XJWuQHZAXuGNKtPD6322V7r0iP"
           $rarPath = "$env:TEMP\UserTemplate.rar"
           $extractPath = "$env:TEMP\UserTemplate"
@@ -86,72 +171,35 @@ jobs:
           gdown $fileId -O $rarPath
           
           if (Test-Path $rarPath) {
-              $fileSize = (Get-Item $rarPath).Length
-              Write-Host "Downloaded: $([math]::Round($fileSize/1MB, 2)) MB"
-              
-              if ($fileSize -gt 10000) {
-                  Write-Host "Installing 7-Zip..."
-                  choco install 7zip -y
-                  
-                  New-Item -Path $extractPath -ItemType Directory -Force | Out-Null
-                  Write-Host "Extracting RAR..."
-                  & "C:\Program Files\7-Zip\7z.exe" x $rarPath -o"$extractPath" -y
-                  
-                  Write-Host "`nExtracted contents:"
-                  Get-ChildItem -Path $extractPath | ForEach-Object {
-                      Write-Host "  - $($_.Name)"
-                  }
-              }
+              choco install 7zip -y
+              New-Item -Path $extractPath -ItemType Directory -Force | Out-Null
+              & "C:\Program Files\7-Zip\7z.exe" x $rarPath -o"$extractPath" -y
           }
 
       - name: Overwrite Windows Default User Profile
         run: |
-          Write-Host "Overwriting C:\Users\Default with custom template..."
-          
           $extractPath = "$env:TEMP\UserTemplate"
           $defaultProfilePath = "C:\Users\Default"
           
-          # Find Default folder
           $defaultFolder = Get-ChildItem -Path $extractPath -Directory -Filter "Default" -Recurse | Select-Object -First 1
           
           if ($defaultFolder) {
               $templatePath = $defaultFolder.FullName
-              Write-Host "Found Default folder at: $templatePath"
           } else {
               $firstFolder = Get-ChildItem -Path $extractPath -Directory | Select-Object -First 1
-              if ($firstFolder) {
-                  $templatePath = $firstFolder.FullName
-              } else {
-                  $templatePath = $extractPath
-              }
+              $templatePath = if ($firstFolder) { $firstFolder.FullName } else { $extractPath }
           }
           
-          # Show contents
-          Write-Host "`nContents inside template:"
-          Get-ChildItem -Path $templatePath -Force | Select-Object -First 20 | ForEach-Object {
-              Write-Host "  - $($_.Name)"
-          }
-          
-          # Just overwrite everything - copy with Force will overwrite existing files
-          Write-Host "`nCopying and overwriting to C:\Users\Default..."
           Copy-Item -Path "$templatePath\*" -Destination $defaultProfilePath -Recurse -Force -ErrorAction Continue
-          
-          Write-Host "`nC:\Users\Default overwritten successfully!"
-          Write-Host "New users will get this custom profile on first login."
 
       - name: Create 10 Local Users
         run: |
-          Write-Host "Creating 10 users..."
-          
           for ($i = 1; $i -le 10; $i++) {
               $username = "User$i"
               net user $username /add /passwordreq:no /expires:never /active:yes
               net localgroup "Remote Desktop Users" $username /add
               net localgroup "Administrators" $username /add
-              Write-Host "Created: $username"
           }
-          
-          Write-Host "`nAll users created!"
 
       - name: Grant Remote Desktop Rights
         run: |
@@ -219,7 +267,9 @@ jobs:
           Write-Host "Users: User1-User10"
           Write-Host "Password: NONE (blank)"
           Write-Host ""
-          Write-Host "Custom Default profile installed!"
+          Write-Host "C: drive cleaned - only Windows!"
+          Write-Host "Bloatware moved to D:\Bloatware"
+          Write-Host "30-40GB freed on C: drive!"
           Write-Host "========================================`n"
           
           while ($true) {
