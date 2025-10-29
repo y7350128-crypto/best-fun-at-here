@@ -1,4 +1,4 @@
-name: RDP-TEST
+name: RDP-Test
 
 on:
   workflow_dispatch:
@@ -13,37 +13,72 @@ jobs:
         run: |
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
           netsh advfirewall firewall add rule name="RDP" dir=in action=allow protocol=TCP localport=3389
-          Restart-Service TermService -Force
+          Restart-Service -Name TermService -Force
 
-      - name: Set Resolution to 1920x1080
+      - name: Set Resolution
         run: |
           Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "MaxXResolution" -Value 1920
           Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "MaxYResolution" -Value 1080
 
-      - name: Allow Blank Password
+      - name: Disable Password
         run: |
+          secedit /export /cfg C:\secpol.cfg
+          (Get-Content C:\secpol.cfg).replace("PasswordComplexity = 1", "PasswordComplexity = 0") | Out-File C:\secpol.cfg
+          (Get-Content C:\secpol.cfg).replace("MinimumPasswordLength = 7", "MinimumPasswordLength = 0") | Out-File C:\secpol.cfg
+          secedit /configure /db c:\windows\security\local.sdb /cfg C:\secpol.cfg /areas SECURITYPOLICY
+          Remove-Item C:\secpol.cfg -Force
           Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name "LimitBlankPasswordUse" -Value 0 -Force
 
-      - name: Create 1 User
+      - name: Create User
         run: |
-          net user TestUser /add /passwordreq:no /active:yes
+          net user TestUser /add /passwordreq:no /expires:never /active:yes
           net localgroup "Remote Desktop Users" TestUser /add
           net localgroup "Administrators" TestUser /add
+
+      - name: Grant RDP Rights
+        run: |
+          secedit /export /cfg C:\secpol.cfg
+          $content = Get-Content C:\secpol.cfg
+          $newContent = @()
+          foreach ($line in $content) {
+              if ($line -like "SeRemoteInteractiveLogonRight*") {
+                  $line = $line + ",TestUser"
+              }
+              $newContent += $line
+          }
+          $newContent | Out-File C:\secpol.cfg
+          secedit /configure /db c:\windows\security\local.sdb /cfg C:\secpol.cfg /areas USER_RIGHTS
+          Remove-Item C:\secpol.cfg -Force
 
       - name: Install Tailscale
         run: |
           Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi" -OutFile "$env:TEMP\ts.msi"
-          Start-Process msiexec.exe -ArgumentList "/i", "$env:TEMP\ts.msi", "/quiet" -Wait
+          Start-Process msiexec.exe -ArgumentList "/i", "`"$env:TEMP\ts.msi`"", "/quiet", "/norestart" -Wait
 
       - name: Connect Tailscale
         run: |
           & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=test-rdp
-          Start-Sleep -Seconds 10
-          $ip = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
-          Write-Host "RDP READY: $ip | User: TestUser | Pass: BLANK"
-          echo "TAILSCALE_IP=$ip" >> $env:GITHUB_ENV
+          
+          $tsIP = $null
+          $retries = 0
+          while (-not $tsIP -and $retries -lt 10) {
+              $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+              Start-Sleep -Seconds 5
+              $retries++
+          }
+          
+          echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
 
       - name: Keep Alive
         run: |
-          while ($true) { Start-Sleep 300 }
+          Write-Host "================================"
+          Write-Host "TEST RDP READY"
+          Write-Host "IP: $env:TAILSCALE_IP"
+          Write-Host "User: TestUser"
+          Write-Host "Password: NONE (blank)"
+          Write-Host "Resolution: 1920x1080"
+          Write-Host "================================"
+          
+          while ($true) { Start-Sleep -Seconds 300 }
