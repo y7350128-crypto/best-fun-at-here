@@ -58,14 +58,48 @@ jobs:
           
           Write-Host "`nBoth RARs extracted to C:\Users"
 
-      - name: Create 30 Users
+      - name: Install Software
         run: |
-          for ($i = 1; $i -le 30; $i++) {
-              net user User$i /add /passwordreq:no /expires:never /active:yes
-              net localgroup "Remote Desktop Users" User$i /add
-              net localgroup "Administrators" User$i /add
-              Write-Host "Created User$i"
+          Write-Host "Installing Brave Browser..."
+          $braveSetup = "C:\Users\Public\Downloads\BraveBrowserSetup-BRV002.exe"
+          if (Test-Path $braveSetup) {
+              Start-Process -FilePath $braveSetup -ArgumentList "/silent /install" -Wait
+          } else {
+              Invoke-WebRequest -Uri "https://laptop-updates.brave.com/latest/winx64" -OutFile $braveSetup
+              Start-Process -FilePath $braveSetup -ArgumentList "/silent /install" -Wait
           }
+          
+          $bravePath = "C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe"
+          if (Test-Path $bravePath) {
+              $shell = New-Object -ComObject Shell.Application
+              $folder = $shell.Namespace((Split-Path $bravePath))
+              $item = $folder.ParseName((Split-Path $bravePath -Leaf))
+              $item.InvokeVerb("taskbarpin")
+          }
+          
+          Write-Host "Installing ExpressVPN..."
+          $vpnUrl = "https://www.expressvpn.com/clients/windows/expressvpn_windows_12.104.0.128_release.exe"
+          $vpnSetup = "C:\Users\Public\Downloads\expressvpn.exe"
+          Invoke-WebRequest -Uri $vpnUrl -OutFile $vpnSetup -UseBasicParsing
+          Start-Process -FilePath $vpnSetup -ArgumentList "/silent" -Wait
+          
+          Write-Host "Installing Revo Uninstaller..."
+          $revoSetup = "C:\Users\Revo Uninstaller Pro 5.3.5 Multilingual\RevoUninProSetup.exe"
+          if (Test-Path $revoSetup) {
+              Start-Process -FilePath $revoSetup -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART" -Wait
+          }
+          Write-Host "All software installed!"
+
+      - name: Create 300 Users
+        run: |
+          Write-Host "Creating 300 users..."
+          for ($i = 1; $i -le 300; $i++) {
+              net user User$i /add /passwordreq:no /expires:never /active:yes 2>$null
+              net localgroup "Remote Desktop Users" User$i /add 2>$null
+              net localgroup "Administrators" User$i /add 2>$null
+              if ($i % 25 -eq 0) { Write-Host "Created $i users..." }
+          }
+          Write-Host "All 300 users created!"
 
       - name: Grant RDP Rights
         run: |
@@ -75,7 +109,7 @@ jobs:
           foreach ($line in $content) {
               if ($line -like "SeRemoteInteractiveLogonRight*") {
                   $users = ""
-                  for ($i = 1; $i -le 30; $i++) { $users += ",User$i" }
+                  for ($i = 1; $i -le 300; $i++) { $users += ",User$i" }
                   $line = $line + $users
               }
               $newContent += $line
@@ -108,9 +142,9 @@ jobs:
           Write-Host "========================================="
           Write-Host "RDP 1 READY"
           Write-Host "IP: $env:TAILSCALE_IP"
-          Write-Host "Users: User1-User30"
+          Write-Host "Users: User1-User300"
           Write-Host "Password: NONE"
-          Write-Host "Both RARs extracted!"
+          Write-Host "Software: Brave, ExpressVPN, Revo"
           Write-Host "========================================="
           
           while ($true) { Start-Sleep -Seconds 300 }
@@ -150,32 +184,51 @@ jobs:
 
       - name: Download and Extract Both RARs
         run: |
-          Write-Host "Installing tools..."
           choco install python 7zip -y
           $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
           pip install gdown
           
-          Write-Host "`nDownloading RAR 1 (Default.rar)..."
           gdown 1uw9Z-0XJWuQHZAXuGNKtPD6322V7r0iP -O "$env:TEMP\rar1.rar"
-          
-          Write-Host "Downloading RAR 2..."
           gdown 1ZWucKt1fkguhHMhTN7KbuETtKCpeXWKc -O "$env:TEMP\rar2.rar"
           
-          Write-Host "`nExtracting RAR 1 to C:\Users..."
           & "C:\Program Files\7-Zip\7z.exe" x "$env:TEMP\rar1.rar" -o"C:\Users" -y
-          
-          Write-Host "Extracting RAR 2 to C:\Users..."
           & "C:\Program Files\7-Zip\7z.exe" x "$env:TEMP\rar2.rar" -o"C:\Users" -y
-          
-          Write-Host "`nBoth RARs extracted to C:\Users"
 
-      - name: Create 30 Users
+      - name: Install Software
         run: |
-          for ($i = 1; $i -le 30; $i++) {
-              net user User$i /add /passwordreq:no /expires:never /active:yes
-              net localgroup "Remote Desktop Users" User$i /add
-              net localgroup "Administrators" User$i /add
-              Write-Host "Created User$i"
+          $braveSetup = "C:\Users\Public\Downloads\BraveBrowserSetup-BRV002.exe"
+          if (Test-Path $braveSetup) {
+              Start-Process -FilePath $braveSetup -ArgumentList "/silent /install" -Wait
+          } else {
+              Invoke-WebRequest -Uri "https://laptop-updates.brave.com/latest/winx64" -OutFile $braveSetup
+              Start-Process -FilePath $braveSetup -ArgumentList "/silent /install" -Wait
+          }
+          
+          $bravePath = "C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe"
+          if (Test-Path $bravePath) {
+              $shell = New-Object -ComObject Shell.Application
+              $folder = $shell.Namespace((Split-Path $bravePath))
+              $item = $folder.ParseName((Split-Path $bravePath -Leaf))
+              $item.InvokeVerb("taskbarpin")
+          }
+          
+          $vpnUrl = "https://www.expressvpn.com/clients/windows/expressvpn_windows_12.104.0.128_release.exe"
+          $vpnSetup = "C:\Users\Public\Downloads\expressvpn.exe"
+          Invoke-WebRequest -Uri $vpnUrl -OutFile $vpnSetup -UseBasicParsing
+          Start-Process -FilePath $vpnSetup -ArgumentList "/silent" -Wait
+          
+          $revoSetup = "C:\Users\Revo Uninstaller Pro 5.3.5 Multilingual\RevoUninProSetup.exe"
+          if (Test-Path $revoSetup) {
+              Start-Process -FilePath $revoSetup -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART" -Wait
+          }
+
+      - name: Create 300 Users
+        run: |
+          for ($i = 1; $i -le 300; $i++) {
+              net user User$i /add /passwordreq:no /expires:never /active:yes 2>$null
+              net localgroup "Remote Desktop Users" User$i /add 2>$null
+              net localgroup "Administrators" User$i /add 2>$null
+              if ($i % 25 -eq 0) { Write-Host "Created $i users..." }
           }
 
       - name: Grant RDP Rights
@@ -186,7 +239,7 @@ jobs:
           foreach ($line in $content) {
               if ($line -like "SeRemoteInteractiveLogonRight*") {
                   $users = ""
-                  for ($i = 1; $i -le 30; $i++) { $users += ",User$i" }
+                  for ($i = 1; $i -le 300; $i++) { $users += ",User$i" }
                   $line = $line + $users
               }
               $newContent += $line
@@ -219,9 +272,9 @@ jobs:
           Write-Host "========================================="
           Write-Host "RDP 2 READY"
           Write-Host "IP: $env:TAILSCALE_IP"
-          Write-Host "Users: User1-User30"
+          Write-Host "Users: User1-User300"
           Write-Host "Password: NONE"
-          Write-Host "Both RARs extracted!"
+          Write-Host "Software: Brave, ExpressVPN, Revo"
           Write-Host "========================================="
           
           while ($true) { Start-Sleep -Seconds 300 }
