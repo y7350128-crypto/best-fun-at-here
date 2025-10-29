@@ -4,236 +4,94 @@ on:
   workflow_dispatch:
 
 jobs:
-  secure-rdp:
+  rdp-1:
     runs-on: windows-latest
     timeout-minutes: 3600
 
     steps:
-      - name: Move Bloatware to D Drive
+      - name: Configure RDP
         run: |
-          Write-Host "=== MOVING BLOATWARE TO D: DRIVE ==="
-          Write-Host "`nBEFORE moving:"
-          Get-PSDrive C,D | Format-Table Name,Used,Free -AutoSize
-          
-          # Create bloatware folder on D:
-          New-Item -Path "D:\Bloatware" -ItemType Directory -Force | Out-Null
-          
-          Write-Host "`nMoving large folders to D:\Bloatware..."
-          
-          # Move .NET SDK (~10GB)
-          if (Test-Path "C:\Program Files\dotnet") {
-              Write-Host "Moving .NET SDK..."
-              Move-Item "C:\Program Files\dotnet" -Destination "D:\Bloatware\dotnet" -Force -ErrorAction SilentlyContinue
-          }
-          
-          # Move Android SDK (~8GB)
-          if (Test-Path "C:\Android") {
-              Write-Host "Moving Android SDK..."
-              Move-Item "C:\Android" -Destination "D:\Bloatware\Android" -Force -ErrorAction SilentlyContinue
-          }
-          
-          # Move CodeQL (~5GB)
-          if (Test-Path "C:\hostedtoolcache\CodeQL") {
-              Write-Host "Moving CodeQL..."
-              Move-Item "C:\hostedtoolcache\CodeQL" -Destination "D:\Bloatware\CodeQL" -Force -ErrorAction SilentlyContinue
-          }
-          
-          # Move Java (~3GB)
-          if (Test-Path "C:\hostedtoolcache\Java") {
-              Write-Host "Moving Java..."
-              Move-Item "C:\hostedtoolcache\Java" -Destination "D:\Bloatware\Java" -Force -ErrorAction SilentlyContinue
-          }
-          
-          # Move Ruby (~2GB)
-          if (Test-Path "C:\hostedtoolcache\Ruby") {
-              Write-Host "Moving Ruby..."
-              Move-Item "C:\hostedtoolcache\Ruby" -Destination "D:\Bloatware\Ruby" -Force -ErrorAction SilentlyContinue
-          }
-          
-          # Move Python (~2GB)
-          if (Test-Path "C:\hostedtoolcache\Python") {
-              Write-Host "Moving Python..."
-              Move-Item "C:\hostedtoolcache\Python" -Destination "D:\Bloatware\Python" -Force -ErrorAction SilentlyContinue
-          }
-          
-          # Move Node.js (~1GB)
-          if (Test-Path "C:\hostedtoolcache\node") {
-              Write-Host "Moving Node.js..."
-              Move-Item "C:\hostedtoolcache\node" -Destination "D:\Bloatware\node" -Force -ErrorAction SilentlyContinue
-          }
-          
-          # Move Visual Studio components (~5GB)
-          if (Test-Path "C:\Program Files (x86)\Microsoft Visual Studio") {
-              Write-Host "Moving Visual Studio..."
-              Move-Item "C:\Program Files (x86)\Microsoft Visual Studio" -Destination "D:\Bloatware\VisualStudio" -Force -ErrorAction SilentlyContinue
-          }
-          
-          # Move Windows Kits (~3GB)
-          if (Test-Path "C:\Program Files (x86)\Windows Kits") {
-              Write-Host "Moving Windows Kits..."
-              Move-Item "C:\Program Files (x86)\Windows Kits" -Destination "D:\Bloatware\WindowsKits" -Force -ErrorAction SilentlyContinue
-          }
-          
-          # Move Microsoft SDKs (~2GB)
-          if (Test-Path "C:\Program Files (x86)\Microsoft SDKs") {
-              Write-Host "Moving Microsoft SDKs (x86)..."
-              Move-Item "C:\Program Files (x86)\Microsoft SDKs" -Destination "D:\Bloatware\MicrosoftSDKs_x86" -Force -ErrorAction SilentlyContinue
-          }
-          
-          if (Test-Path "C:\Program Files\Microsoft SDKs") {
-              Write-Host "Moving Microsoft SDKs (x64)..."
-              Move-Item "C:\Program Files\Microsoft SDKs" -Destination "D:\Bloatware\MicrosoftSDKs_x64" -Force -ErrorAction SilentlyContinue
-          }
-          
-          # Move Azure CLI (~500MB)
-          if (Test-Path "C:\Program Files (x86)\Microsoft SDKs\Azure") {
-              Write-Host "Moving Azure CLI..."
-              Move-Item "C:\Program Files (x86)\Microsoft SDKs\Azure" -Destination "D:\Bloatware\Azure" -Force -ErrorAction SilentlyContinue
-          }
-          
-          # Move Go (~500MB)
-          if (Test-Path "C:\hostedtoolcache\go") {
-              Write-Host "Moving Go..."
-              Move-Item "C:\hostedtoolcache\go" -Destination "D:\Bloatware\go" -Force -ErrorAction SilentlyContinue
-          }
-          
-          Write-Host "`nAFTER moving:"
-          Get-PSDrive C,D | Format-Table Name,Used,Free -AutoSize
-          
-          Write-Host "`nBloatware moved to D:\Bloatware"
-          Write-Host "C: drive is now clean with only Windows!"
-          Write-Host "=== DISK OPTIMIZATION COMPLETE ==="
-
-      - name: Configure Core RDP Settings
-        run: |
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
-                             -Name "fDenyTSConnections" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
-                             -Name "UserAuthentication" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
-                             -Name "SecurityLayer" -Value 0 -Force
-
-          netsh advfirewall firewall delete rule name="RDP-Tailscale"
-          netsh advfirewall firewall add rule name="RDP-Tailscale" `
-            dir=in action=allow protocol=TCP localport=3389
-
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
+          netsh advfirewall firewall add rule name="RDP" dir=in action=allow protocol=TCP localport=3389
           Restart-Service -Name TermService -Force
 
-      - name: Disable Password Complexity and Allow Blank Passwords
+      - name: Disable Password Requirements
         run: |
           secedit /export /cfg C:\secpol.cfg
           (Get-Content C:\secpol.cfg).replace("PasswordComplexity = 1", "PasswordComplexity = 0") | Out-File C:\secpol.cfg
           (Get-Content C:\secpol.cfg).replace("MinimumPasswordLength = 7", "MinimumPasswordLength = 0") | Out-File C:\secpol.cfg
           secedit /configure /db c:\windows\security\local.sdb /cfg C:\secpol.cfg /areas SECURITYPOLICY
-          Remove-Item -Force C:\secpol.cfg -Confirm:$false
-          
+          Remove-Item C:\secpol.cfg -Force
           Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name "LimitBlankPasswordUse" -Value 0 -Force
 
-      - name: Install RDP Wrapper for Multiple Sessions
+      - name: Install RDP Wrapper
         run: |
-          Write-Host "Installing RDP Wrapper..."
-          
           $url = "https://github.com/stascorp/rdpwrap/releases/download/v1.6.2/RDPWrap-v1.6.2.zip"
-          $output = "$env:TEMP\RDPWrap.zip"
-          
-          try {
-              Invoke-WebRequest -Uri $url -OutFile $output -UseBasicParsing
-              Expand-Archive -Path $output -DestinationPath "$env:TEMP\RDPWrap" -Force
-              
-              cd "$env:TEMP\RDPWrap"
-              cmd /c install.bat
-              Start-Sleep -Seconds 5
-              
-              $iniUrl = "https://raw.githubusercontent.com/sebaxakerhtc/rdpwrap.ini/master/rdpwrap.ini"
-              $iniPath = "C:\Program Files\RDP Wrapper\rdpwrap.ini"
-              Invoke-WebRequest -Uri $iniUrl -OutFile $iniPath -UseBasicParsing
-              
-              Restart-Service termservice -Force
-              Write-Host "RDP Wrapper installed!"
-          }
-          catch {
-              Write-Warning "RDP Wrapper failed"
-          }
+          Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\RDPWrap.zip" -UseBasicParsing
+          Expand-Archive -Path "$env:TEMP\RDPWrap.zip" -DestinationPath "$env:TEMP\RDPWrap" -Force
+          cd "$env:TEMP\RDPWrap"
+          cmd /c install.bat
+          Start-Sleep -Seconds 5
+          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/sebaxakerhtc/rdpwrap.ini/master/rdpwrap.ini" -OutFile "C:\Program Files\RDP Wrapper\rdpwrap.ini" -UseBasicParsing
+          Restart-Service termservice -Force
 
-      - name: Install Python and gdown
+      - name: Download and Extract Both RARs
         run: |
-          choco install python -y --version=3.11.0
+          Write-Host "Installing tools..."
+          choco install python 7zip -y
           $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-          python -m pip install --upgrade pip
           pip install gdown
+          
+          Write-Host "`nDownloading RAR 1 (Default.rar)..."
+          gdown 1uw9Z-0XJWuQHZAXuGNKtPD6322V7r0iP -O "$env:TEMP\rar1.rar"
+          
+          Write-Host "Downloading RAR 2..."
+          gdown 1ZWucKt1fkguhHMhTN7KbuETtKCpeXWKc -O "$env:TEMP\rar2.rar"
+          
+          Write-Host "`nExtracting RAR 1 to C:\Users..."
+          & "C:\Program Files\7-Zip\7z.exe" x "$env:TEMP\rar1.rar" -o"C:\Users" -y
+          
+          Write-Host "Extracting RAR 2 to C:\Users..."
+          & "C:\Program Files\7-Zip\7z.exe" x "$env:TEMP\rar2.rar" -o"C:\Users" -y
+          
+          Write-Host "`nBoth RARs extracted to C:\Users"
 
-      - name: Download and Extract RAR from Google Drive
+      - name: Create 30 Users
         run: |
-          $fileId = "1uw9Z-0XJWuQHZAXuGNKtPD6322V7r0iP"
-          $rarPath = "$env:TEMP\UserTemplate.rar"
-          $extractPath = "$env:TEMP\UserTemplate"
-          
-          gdown $fileId -O $rarPath
-          
-          if (Test-Path $rarPath) {
-              choco install 7zip -y
-              New-Item -Path $extractPath -ItemType Directory -Force | Out-Null
-              & "C:\Program Files\7-Zip\7z.exe" x $rarPath -o"$extractPath" -y
+          for ($i = 1; $i -le 30; $i++) {
+              net user User$i /add /passwordreq:no /expires:never /active:yes
+              net localgroup "Remote Desktop Users" User$i /add
+              net localgroup "Administrators" User$i /add
+              Write-Host "Created User$i"
           }
 
-      - name: Overwrite Windows Default User Profile
-        run: |
-          $extractPath = "$env:TEMP\UserTemplate"
-          $defaultProfilePath = "C:\Users\Default"
-          
-          $defaultFolder = Get-ChildItem -Path $extractPath -Directory -Filter "Default" -Recurse | Select-Object -First 1
-          
-          if ($defaultFolder) {
-              $templatePath = $defaultFolder.FullName
-          } else {
-              $firstFolder = Get-ChildItem -Path $extractPath -Directory | Select-Object -First 1
-              $templatePath = if ($firstFolder) { $firstFolder.FullName } else { $extractPath }
-          }
-          
-          Copy-Item -Path "$templatePath\*" -Destination $defaultProfilePath -Recurse -Force -ErrorAction Continue
-
-      - name: Create 10 Local Users
-        run: |
-          for ($i = 1; $i -le 10; $i++) {
-              $username = "User$i"
-              net user $username /add /passwordreq:no /expires:never /active:yes
-              net localgroup "Remote Desktop Users" $username /add
-              net localgroup "Administrators" $username /add
-          }
-
-      - name: Grant Remote Desktop Rights
+      - name: Grant RDP Rights
         run: |
           secedit /export /cfg C:\secpol.cfg
           $content = Get-Content C:\secpol.cfg
-          
           $newContent = @()
           foreach ($line in $content) {
               if ($line -like "SeRemoteInteractiveLogonRight*") {
                   $users = ""
-                  for ($i = 1; $i -le 10; $i++) {
-                      $users += ",User$i"
-                  }
+                  for ($i = 1; $i -le 30; $i++) { $users += ",User$i" }
                   $line = $line + $users
               }
               $newContent += $line
           }
-          
           $newContent | Out-File C:\secpol.cfg
           secedit /configure /db c:\windows\security\local.sdb /cfg C:\secpol.cfg /areas USER_RIGHTS
-          Remove-Item -Force C:\secpol.cfg -Confirm:$false
+          Remove-Item C:\secpol.cfg -Force
 
       - name: Install Tailscale
         run: |
-          $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
-          $installerPath = "$env:TEMP\tailscale.msi"
-          
-          Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
-          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
-          Remove-Item $installerPath -Force
+          Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi" -OutFile "$env:TEMP\tailscale.msi"
+          Start-Process msiexec.exe -ArgumentList "/i", "`"$env:TEMP\tailscale.msi`"", "/quiet", "/norestart" -Wait
 
-      - name: Establish Tailscale Connection
+      - name: Connect Tailscale
         run: |
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=rdp1-$env:GITHUB_RUN_ID
           
           $tsIP = $null
           $retries = 0
@@ -243,36 +101,127 @@ jobs:
               $retries++
           }
           
-          if (-not $tsIP) {
-              Write-Error "Tailscale IP not assigned"
-              exit 1
+          echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
+
+      - name: Keep Alive
+        run: |
+          Write-Host "========================================="
+          Write-Host "RDP 1 READY"
+          Write-Host "IP: $env:TAILSCALE_IP"
+          Write-Host "Users: User1-User30"
+          Write-Host "Password: NONE"
+          Write-Host "Both RARs extracted!"
+          Write-Host "========================================="
+          
+          while ($true) { Start-Sleep -Seconds 300 }
+
+  rdp-2:
+    runs-on: windows-latest
+    timeout-minutes: 3600
+
+    steps:
+      - name: Configure RDP
+        run: |
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
+          netsh advfirewall firewall add rule name="RDP" dir=in action=allow protocol=TCP localport=3389
+          Restart-Service -Name TermService -Force
+
+      - name: Disable Password Requirements
+        run: |
+          secedit /export /cfg C:\secpol.cfg
+          (Get-Content C:\secpol.cfg).replace("PasswordComplexity = 1", "PasswordComplexity = 0") | Out-File C:\secpol.cfg
+          (Get-Content C:\secpol.cfg).replace("MinimumPasswordLength = 7", "MinimumPasswordLength = 0") | Out-File C:\secpol.cfg
+          secedit /configure /db c:\windows\security\local.sdb /cfg C:\secpol.cfg /areas SECURITYPOLICY
+          Remove-Item C:\secpol.cfg -Force
+          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name "LimitBlankPasswordUse" -Value 0 -Force
+
+      - name: Install RDP Wrapper
+        run: |
+          $url = "https://github.com/stascorp/rdpwrap/releases/download/v1.6.2/RDPWrap-v1.6.2.zip"
+          Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\RDPWrap.zip" -UseBasicParsing
+          Expand-Archive -Path "$env:TEMP\RDPWrap.zip" -DestinationPath "$env:TEMP\RDPWrap" -Force
+          cd "$env:TEMP\RDPWrap"
+          cmd /c install.bat
+          Start-Sleep -Seconds 5
+          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/sebaxakerhtc/rdpwrap.ini/master/rdpwrap.ini" -OutFile "C:\Program Files\RDP Wrapper\rdpwrap.ini" -UseBasicParsing
+          Restart-Service termservice -Force
+
+      - name: Download and Extract Both RARs
+        run: |
+          Write-Host "Installing tools..."
+          choco install python 7zip -y
+          $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+          pip install gdown
+          
+          Write-Host "`nDownloading RAR 1 (Default.rar)..."
+          gdown 1uw9Z-0XJWuQHZAXuGNKtPD6322V7r0iP -O "$env:TEMP\rar1.rar"
+          
+          Write-Host "Downloading RAR 2..."
+          gdown 1ZWucKt1fkguhHMhTN7KbuETtKCpeXWKc -O "$env:TEMP\rar2.rar"
+          
+          Write-Host "`nExtracting RAR 1 to C:\Users..."
+          & "C:\Program Files\7-Zip\7z.exe" x "$env:TEMP\rar1.rar" -o"C:\Users" -y
+          
+          Write-Host "Extracting RAR 2 to C:\Users..."
+          & "C:\Program Files\7-Zip\7z.exe" x "$env:TEMP\rar2.rar" -o"C:\Users" -y
+          
+          Write-Host "`nBoth RARs extracted to C:\Users"
+
+      - name: Create 30 Users
+        run: |
+          for ($i = 1; $i -le 30; $i++) {
+              net user User$i /add /passwordreq:no /expires:never /active:yes
+              net localgroup "Remote Desktop Users" User$i /add
+              net localgroup "Administrators" User$i /add
+              Write-Host "Created User$i"
+          }
+
+      - name: Grant RDP Rights
+        run: |
+          secedit /export /cfg C:\secpol.cfg
+          $content = Get-Content C:\secpol.cfg
+          $newContent = @()
+          foreach ($line in $content) {
+              if ($line -like "SeRemoteInteractiveLogonRight*") {
+                  $users = ""
+                  for ($i = 1; $i -le 30; $i++) { $users += ",User$i" }
+                  $line = $line + $users
+              }
+              $newContent += $line
+          }
+          $newContent | Out-File C:\secpol.cfg
+          secedit /configure /db c:\windows\security\local.sdb /cfg C:\secpol.cfg /areas USER_RIGHTS
+          Remove-Item C:\secpol.cfg -Force
+
+      - name: Install Tailscale
+        run: |
+          Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi" -OutFile "$env:TEMP\tailscale.msi"
+          Start-Process msiexec.exe -ArgumentList "/i", "`"$env:TEMP\tailscale.msi`"", "/quiet", "/norestart" -Wait
+
+      - name: Connect Tailscale
+        run: |
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=rdp2-$env:GITHUB_RUN_ID
+          
+          $tsIP = $null
+          $retries = 0
+          while (-not $tsIP -and $retries -lt 10) {
+              $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+              Start-Sleep -Seconds 5
+              $retries++
           }
           
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
 
-      - name: Verify RDP
+      - name: Keep Alive
         run: |
-          $testResult = Test-NetConnection -ComputerName $env:TAILSCALE_IP -Port 3389
-          if (-not $testResult.TcpTestSucceeded) {
-              Write-Error "RDP failed"
-              exit 1
-          }
-
-      - name: Maintain Connection
-        run: |
-          Write-Host "`n========================================="
-          Write-Host "      RDP SERVER READY"
           Write-Host "========================================="
+          Write-Host "RDP 2 READY"
           Write-Host "IP: $env:TAILSCALE_IP"
-          Write-Host "Users: User1-User10"
-          Write-Host "Password: NONE (blank)"
-          Write-Host ""
-          Write-Host "C: drive cleaned - only Windows!"
-          Write-Host "Bloatware moved to D:\Bloatware"
-          Write-Host "30-40GB freed on C: drive!"
-          Write-Host "========================================`n"
+          Write-Host "Users: User1-User30"
+          Write-Host "Password: NONE"
+          Write-Host "Both RARs extracted!"
+          Write-Host "========================================="
           
-          while ($true) {
-              Write-Host "[$(Get-Date)] RDP Active"
-              Start-Sleep -Seconds 300
-          }
+          while ($true) { Start-Sleep -Seconds 300 }
