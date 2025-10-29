@@ -17,22 +17,6 @@ jobs:
           netsh advfirewall firewall add rule name="RDP" dir=in action=allow protocol=TCP localport=3389
           Restart-Service -Name TermService -Force
 
-      - name: Optimize RDP Performance
-        run: |
-          Write-Host "Optimizing RDP for high FPS..."
-          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "fEnableRemoteFXAdvancedRemoteApp" -Value 1 -Force
-          New-Item -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Force -ErrorAction SilentlyContinue
-          Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name "MaxCompressionLevel" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "ColorDepth" -Value 5 -Force
-          Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name "fEnableWddmDriver" -Value 1 -Force
-          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "FlowControlDisable" -Value 1 -Force
-          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "FlowControlDisplayBandwidth" -Value 100 -Force
-          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "FlowControlChannelBandwidth" -Value 100 -Force
-          Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name "fDisableWallpaper" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name "fDisableMenuAnims" -Value 0 -Force
-          Restart-Service TermService -Force
-          Write-Host "RDP performance optimized!"
-
       - name: Disable Password Requirements
         run: |
           secedit /export /cfg C:\secpol.cfg
@@ -113,11 +97,10 @@ jobs:
       - name: Keep Alive
         run: |
           Write-Host "========================================="
-          Write-Host "RDP 1 READY - HIGH FPS MODE"
+          Write-Host "RDP 1 READY"
           Write-Host "IP: $env:TAILSCALE_IP"
           Write-Host "Users: User1-User300"
           Write-Host "Password: NONE"
-          Write-Host "Performance: Optimized for 60 FPS"
           Write-Host "========================================="
           
           while ($true) { Start-Sleep -Seconds 300 }
@@ -134,20 +117,6 @@ jobs:
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
           netsh advfirewall firewall add rule name="RDP" dir=in action=allow protocol=TCP localport=3389
           Restart-Service -Name TermService -Force
-
-      - name: Optimize RDP Performance
-        run: |
-          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "fEnableRemoteFXAdvancedRemoteApp" -Value 1 -Force
-          New-Item -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Force -ErrorAction SilentlyContinue
-          Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name "MaxCompressionLevel" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "ColorDepth" -Value 5 -Force
-          Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name "fEnableWddmDriver" -Value 1 -Force
-          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "FlowControlDisable" -Value 1 -Force
-          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "FlowControlDisplayBandwidth" -Value 100 -Force
-          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "FlowControlChannelBandwidth" -Value 100 -Force
-          Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name "fDisableWallpaper" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name "fDisableMenuAnims" -Value 0 -Force
-          Restart-Service TermService -Force
 
       - name: Disable Password Requirements
         run: |
@@ -229,11 +198,10 @@ jobs:
       - name: Keep Alive
         run: |
           Write-Host "========================================="
-          Write-Host "RDP 2 READY - HIGH FPS MODE"
+          Write-Host "RDP 2 READY"
           Write-Host "IP: $env:TAILSCALE_IP"
           Write-Host "Users: User1-User300"
           Write-Host "Password: NONE"
-          Write-Host "Performance: Optimized for 60 FPS"
           Write-Host "========================================="
           
           while ($true) { Start-Sleep -Seconds 300 }
