@@ -17,10 +17,12 @@ jobs:
           netsh advfirewall firewall add rule name="RDP" dir=in action=allow protocol=TCP localport=3389
           Restart-Service -Name TermService -Force
 
-      - name: Set Resolution
+      - name: Set Resolution (Portrait Mode)
         run: |
-          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "MaxXResolution" -Value 1920
-          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "MaxYResolution" -Value 1080
+          Write-Host "Setting portrait resolution..."
+          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "MaxXResolution" -Value 1080
+          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "MaxYResolution" -Value 1920
+          Write-Host "Resolution set to 1080x1920 (portrait)"
 
       - name: Disable Password
         run: |
@@ -78,7 +80,7 @@ jobs:
           Write-Host "IP: $env:TAILSCALE_IP"
           Write-Host "User: TestUser"
           Write-Host "Password: NONE (blank)"
-          Write-Host "Resolution: 1920x1080"
+          Write-Host "Resolution: 1080x1920 (Portrait)"
           Write-Host "================================"
           
           while ($true) { Start-Sleep -Seconds 300 }
