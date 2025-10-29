@@ -39,61 +39,89 @@ jobs:
 
       - name: Download and Extract Both RARs
         run: |
-          Write-Host "Installing tools..."
           choco install python 7zip -y
           $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
           pip install gdown
           
-          Write-Host "`nDownloading RAR 1 (Default.rar)..."
           gdown 1uw9Z-0XJWuQHZAXuGNKtPD6322V7r0iP -O "$env:TEMP\rar1.rar"
-          
-          Write-Host "Downloading RAR 2..."
           gdown 1ZWucKt1fkguhHMhTN7KbuETtKCpeXWKc -O "$env:TEMP\rar2.rar"
           
-          Write-Host "`nExtracting RAR 1 to C:\Users..."
           & "C:\Program Files\7-Zip\7z.exe" x "$env:TEMP\rar1.rar" -o"C:\Users" -y
-          
-          Write-Host "Extracting RAR 2 to C:\Users..."
           & "C:\Program Files\7-Zip\7z.exe" x "$env:TEMP\rar2.rar" -o"C:\Users" -y
-          
-          Write-Host "`nBoth RARs extracted to C:\Users"
 
-      - name: Install Software
+      - name: Create User1 First
         run: |
-          Write-Host "Installing Brave Browser..."
-          $braveSetup = "C:\Users\Public\Downloads\BraveBrowserSetup-BRV002.exe"
-          if (Test-Path $braveSetup) {
-              Start-Process -FilePath $braveSetup -ArgumentList "/silent /install" -Wait
-          } else {
-              Invoke-WebRequest -Uri "https://laptop-updates.brave.com/latest/winx64" -OutFile $braveSetup
-              Start-Process -FilePath $braveSetup -ArgumentList "/silent /install" -Wait
+          Write-Host "Creating User1..."
+          net user User1 /add /passwordreq:no /expires:never /active:yes
+          net localgroup "Remote Desktop Users" User1 /add
+          net localgroup "Administrators" User1 /add
+
+      - name: Install Software as User1
+        run: |
+          Write-Host "Installing software in User1 profile..."
+          
+          # Start jobs in parallel
+          $jobs = @()
+          
+          # Brave installation job
+          $jobs += Start-Job -ScriptBlock {
+              $braveSetup = "C:\Users\User1\Downloads\BraveBrowserSetup-BRV002.exe"
+              if (Test-Path $braveSetup) {
+                  Start-Process -FilePath $braveSetup -ArgumentList "/silent /install" -Wait
+              } else {
+                  $braveSetup = "C:\Users\Public\Downloads\BraveBrowserSetup-BRV002.exe"
+                  if (Test-Path $braveSetup) {
+                      Start-Process -FilePath $braveSetup -ArgumentList "/silent /install" -Wait
+                  } else {
+                      Invoke-WebRequest -Uri "https://laptop-updates.brave.com/latest/winx64" -OutFile $braveSetup
+                      Start-Process -FilePath $braveSetup -ArgumentList "/silent /install" -Wait
+                  }
+              }
+              Write-Output "Brave installed"
           }
           
+          # ExpressVPN installation job
+          $jobs += Start-Job -ScriptBlock {
+              $vpnSetup = "C:\Users\User1\Downloads\expressvpn_windows_12.104.0.128_release.exe"
+              if (-not (Test-Path $vpnSetup)) {
+                  $vpnUrl = "https://www.expressvpn.com/clients/windows/expressvpn_windows_12.104.0.128_release.exe"
+                  Invoke-WebRequest -Uri $vpnUrl -OutFile $vpnSetup -UseBasicParsing
+              }
+              Start-Process -FilePath $vpnSetup -ArgumentList "/silent" -Wait
+              Write-Output "ExpressVPN installed"
+          }
+          
+          # Revo Uninstaller installation job
+          $jobs += Start-Job -ScriptBlock {
+              $revoSetup = "C:\Users\Revo Uninstaller Pro 5.3.5 Multilingual\RevoUninProSetup.exe"
+              if (Test-Path $revoSetup) {
+                  Start-Process -FilePath $revoSetup -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART" -Wait
+                  Write-Output "Revo installed"
+              }
+          }
+          
+          # Wait for all installations to complete
+          Write-Host "Installing Brave, ExpressVPN, and Revo in parallel..."
+          $jobs | Wait-Job | Receive-Job
+          $jobs | Remove-Job
+          
+          # Pin Brave to taskbar
+          Start-Sleep -Seconds 5
           $bravePath = "C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe"
           if (Test-Path $bravePath) {
               $shell = New-Object -ComObject Shell.Application
               $folder = $shell.Namespace((Split-Path $bravePath))
               $item = $folder.ParseName((Split-Path $bravePath -Leaf))
               $item.InvokeVerb("taskbarpin")
+              Write-Host "Brave pinned to taskbar"
           }
           
-          Write-Host "Installing ExpressVPN..."
-          $vpnUrl = "https://www.expressvpn.com/clients/windows/expressvpn_windows_12.104.0.128_release.exe"
-          $vpnSetup = "C:\Users\Public\Downloads\expressvpn.exe"
-          Invoke-WebRequest -Uri $vpnUrl -OutFile $vpnSetup -UseBasicParsing
-          Start-Process -FilePath $vpnSetup -ArgumentList "/silent" -Wait
-          
-          Write-Host "Installing Revo Uninstaller..."
-          $revoSetup = "C:\Users\Revo Uninstaller Pro 5.3.5 Multilingual\RevoUninProSetup.exe"
-          if (Test-Path $revoSetup) {
-              Start-Process -FilePath $revoSetup -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART" -Wait
-          }
           Write-Host "All software installed!"
 
-      - name: Create 300 Users
+      - name: Create Remaining 299 Users
         run: |
-          Write-Host "Creating 300 users..."
-          for ($i = 1; $i -le 300; $i++) {
+          Write-Host "Creating remaining 299 users..."
+          for ($i = 2; $i -le 300; $i++) {
               net user User$i /add /passwordreq:no /expires:never /active:yes 2>$null
               net localgroup "Remote Desktop Users" User$i /add 2>$null
               net localgroup "Administrators" User$i /add 2>$null
@@ -194,16 +222,50 @@ jobs:
           & "C:\Program Files\7-Zip\7z.exe" x "$env:TEMP\rar1.rar" -o"C:\Users" -y
           & "C:\Program Files\7-Zip\7z.exe" x "$env:TEMP\rar2.rar" -o"C:\Users" -y
 
-      - name: Install Software
+      - name: Create User1 First
         run: |
-          $braveSetup = "C:\Users\Public\Downloads\BraveBrowserSetup-BRV002.exe"
-          if (Test-Path $braveSetup) {
-              Start-Process -FilePath $braveSetup -ArgumentList "/silent /install" -Wait
-          } else {
-              Invoke-WebRequest -Uri "https://laptop-updates.brave.com/latest/winx64" -OutFile $braveSetup
-              Start-Process -FilePath $braveSetup -ArgumentList "/silent /install" -Wait
+          net user User1 /add /passwordreq:no /expires:never /active:yes
+          net localgroup "Remote Desktop Users" User1 /add
+          net localgroup "Administrators" User1 /add
+
+      - name: Install Software as User1
+        run: |
+          $jobs = @()
+          
+          $jobs += Start-Job -ScriptBlock {
+              $braveSetup = "C:\Users\User1\Downloads\BraveBrowserSetup-BRV002.exe"
+              if (Test-Path $braveSetup) {
+                  Start-Process -FilePath $braveSetup -ArgumentList "/silent /install" -Wait
+              } else {
+                  $braveSetup = "C:\Users\Public\Downloads\BraveBrowserSetup-BRV002.exe"
+                  if (Test-Path $braveSetup) {
+                      Start-Process -FilePath $braveSetup -ArgumentList "/silent /install" -Wait
+                  } else {
+                      Invoke-WebRequest -Uri "https://laptop-updates.brave.com/latest/winx64" -OutFile $braveSetup
+                      Start-Process -FilePath $braveSetup -ArgumentList "/silent /install" -Wait
+                  }
+              }
           }
           
+          $jobs += Start-Job -ScriptBlock {
+              $vpnSetup = "C:\Users\User1\Downloads\expressvpn_windows_12.104.0.128_release.exe"
+              if (-not (Test-Path $vpnSetup)) {
+                  Invoke-WebRequest -Uri "https://www.expressvpn.com/clients/windows/expressvpn_windows_12.104.0.128_release.exe" -OutFile $vpnSetup -UseBasicParsing
+              }
+              Start-Process -FilePath $vpnSetup -ArgumentList "/silent" -Wait
+          }
+          
+          $jobs += Start-Job -ScriptBlock {
+              $revoSetup = "C:\Users\Revo Uninstaller Pro 5.3.5 Multilingual\RevoUninProSetup.exe"
+              if (Test-Path $revoSetup) {
+                  Start-Process -FilePath $revoSetup -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART" -Wait
+              }
+          }
+          
+          $jobs | Wait-Job | Receive-Job
+          $jobs | Remove-Job
+          
+          Start-Sleep -Seconds 5
           $bravePath = "C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe"
           if (Test-Path $bravePath) {
               $shell = New-Object -ComObject Shell.Application
@@ -211,20 +273,10 @@ jobs:
               $item = $folder.ParseName((Split-Path $bravePath -Leaf))
               $item.InvokeVerb("taskbarpin")
           }
-          
-          $vpnUrl = "https://www.expressvpn.com/clients/windows/expressvpn_windows_12.104.0.128_release.exe"
-          $vpnSetup = "C:\Users\Public\Downloads\expressvpn.exe"
-          Invoke-WebRequest -Uri $vpnUrl -OutFile $vpnSetup -UseBasicParsing
-          Start-Process -FilePath $vpnSetup -ArgumentList "/silent" -Wait
-          
-          $revoSetup = "C:\Users\Revo Uninstaller Pro 5.3.5 Multilingual\RevoUninProSetup.exe"
-          if (Test-Path $revoSetup) {
-              Start-Process -FilePath $revoSetup -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART" -Wait
-          }
 
-      - name: Create 300 Users
+      - name: Create Remaining 299 Users
         run: |
-          for ($i = 1; $i -le 300; $i++) {
+          for ($i = 2; $i -le 300; $i++) {
               net user User$i /add /passwordreq:no /expires:never /active:yes 2>$null
               net localgroup "Remote Desktop Users" User$i /add 2>$null
               net localgroup "Administrators" User$i /add 2>$null
