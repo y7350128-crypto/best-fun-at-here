@@ -39,35 +39,22 @@ jobs:
 
       - name: Download and Extract Both RARs
         run: |
-          Write-Host "Installing tools..."
           choco install python 7zip -y
           $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
           pip install gdown
           
-          Write-Host "`nDownloading RAR 1 (Default.rar)..."
           gdown 1uw9Z-0XJWuQHZAXuGNKtPD6322V7r0iP -O "$env:TEMP\rar1.rar"
-          
-          Write-Host "Downloading RAR 2..."
           gdown 1ZWucKt1fkguhHMhTN7KbuETtKCpeXWKc -O "$env:TEMP\rar2.rar"
           
-          Write-Host "`nExtracting RAR 1 to C:\Users..."
           & "C:\Program Files\7-Zip\7z.exe" x "$env:TEMP\rar1.rar" -o"C:\Users" -y
-          
-          Write-Host "Extracting RAR 2 to C:\Users..."
           & "C:\Program Files\7-Zip\7z.exe" x "$env:TEMP\rar2.rar" -o"C:\Users" -y
-          
-          Write-Host "`nBoth RARs extracted to C:\Users"
 
-      - name: Install Brave Browser and ExpressVPN
+      - name: Install Software
         run: |
-          Write-Host "Installing Brave Browser..."
-          
           $braveSetup = "C:\Users\Public\Downloads\BraveBrowserSetup-BRV002.exe"
           if (Test-Path $braveSetup) {
               Start-Process -FilePath $braveSetup -ArgumentList "/silent /install" -Wait
-              Write-Host "Brave installed"
           } else {
-              Write-Host "Brave setup not found, downloading..."
               Invoke-WebRequest -Uri "https://laptop-updates.brave.com/latest/winx64" -OutFile $braveSetup
               Start-Process -FilePath $braveSetup -ArgumentList "/silent /install" -Wait
           }
@@ -78,85 +65,102 @@ jobs:
               $folder = $shell.Namespace((Split-Path $bravePath))
               $item = $folder.ParseName((Split-Path $bravePath -Leaf))
               $item.InvokeVerb("taskbarpin")
-              Write-Host "Brave pinned to taskbar"
           }
           
-          Write-Host "`nDownloading and installing ExpressVPN..."
           $vpnUrl = "https://www.expressvpn.com/clients/windows/expressvpn_windows_12.104.0.128_release.exe"
           $vpnSetup = "C:\Users\Public\Downloads\expressvpn.exe"
           Invoke-WebRequest -Uri $vpnUrl -OutFile $vpnSetup -UseBasicParsing
           Start-Process -FilePath $vpnSetup -ArgumentList "/silent" -Wait
-          Write-Host "ExpressVPN installed"
           
-          Write-Host "`nInstalling Revo Uninstaller..."
           $revoSetup = "C:\Users\Revo Uninstaller Pro 5.3.5 Multilingual\RevoUninProSetup.exe"
           if (Test-Path $revoSetup) {
               Start-Process -FilePath $revoSetup -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART" -Wait
-              Write-Host "Revo Uninstaller installed"
           }
-          
-          Write-Host "`nAll software installed!"
 
-      - name: Create 300 Users with Admin Rights
+      - name: Create 300 Users
         run: |
-          Write-Host "Creating 300 users with admin privileges..."
-          
           for ($i = 1; $i -le 300; $i++) {
-              $username = "User$i"
-              net user $username /add /passwordreq:no /expires:never /active:yes 2>$null
-              net localgroup "Remote Desktop Users" $username /add 2>$null
-              net localgroup "Administrators" $username /add 2>$null
-              
-              if ($i % 25 -eq 0) {
-                  Write-Host "Created $i users..."
-              }
+              net user User$i /add /passwordreq:no /expires:never /active:yes 2>$null
+              net localgroup "Remote Desktop Users" User$i /add 2>$null
+              net localgroup "Administrators" User$i /add 2>$null
+              if ($i % 25 -eq 0) { Write-Host "Created $i users..." }
           }
-          
-          Write-Host "All 300 users created with admin privileges!"
 
       - name: Grant RDP Rights
         run: |
-          Write-Host "Granting RDP rights to all 300 users..."
-          
           secedit /export /cfg C:\secpol.cfg
           $content = Get-Content C:\secpol.cfg
           $newContent = @()
-          
           foreach ($line in $content) {
               if ($line -like "SeRemoteInteractiveLogonRight*") {
                   $users = ""
-                  for ($i = 1; $i -le 300; $i++) {
-                      $users += ",User$i"
-                  }
+                  for ($i = 1; $i -le 300; $i++) { $users += ",User$i" }
                   $line = $line + $users
               }
               $newContent += $line
           }
-          
           $newContent | Out-File C:\secpol.cfg
           secedit /configure /db c:\windows\security\local.sdb /cfg C:\secpol.cfg /areas USER_RIGHTS
           Remove-Item C:\secpol.cfg -Force
-          
-          Write-Host "RDP rights granted!"
 
       - name: Install Tailscale
         run: |
+          Write-Host "Installing Tailscale..."
           Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi" -OutFile "$env:TEMP\tailscale.msi"
           Start-Process msiexec.exe -ArgumentList "/i", "`"$env:TEMP\tailscale.msi`"", "/quiet", "/norestart" -Wait
+          Write-Host "Tailscale installed!"
 
       - name: Connect Tailscale
         run: |
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=rdp-$env:GITHUB_RUN_ID
+          Write-Host "Connecting to Tailscale network..."
           
+          # Start Tailscale service
+          Start-Service Tailscale -ErrorAction SilentlyContinue
+          Start-Sleep -Seconds 3
+          
+          # Connect with timeout
+          try {
+              $process = Start-Process -FilePath "$env:ProgramFiles\Tailscale\tailscale.exe" -ArgumentList "up", "--authkey=${{ secrets.TAILSCALE_AUTH_KEY }}", "--hostname=rdp-$env:GITHUB_RUN_ID" -PassThru -NoNewWindow
+              
+              if ($process.WaitForExit(60000)) {
+                  Write-Host "Tailscale connected successfully!"
+              } else {
+                  Write-Host "Tailscale connection timeout - killing process"
+                  $process.Kill()
+              }
+          } catch {
+              Write-Warning "Tailscale connection error: $($_.Exception.Message)"
+          }
+          
+          # Get IP with retry
+          Write-Host "Getting Tailscale IP..."
           $tsIP = $null
           $retries = 0
-          while (-not $tsIP -and $retries -lt 10) {
-              $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
-              Start-Sleep -Seconds 5
+          
+          while (-not $tsIP -and $retries -lt 20) {
+              try {
+                  $tsIP = (& "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4 2>&1 | Out-String).Trim()
+                  if ($tsIP -and $tsIP -match '^\d+\.\d+\.\d+\.\d+$') {
+                      Write-Host "Got IP: $tsIP"
+                      break
+                  } else {
+                      $tsIP = $null
+                  }
+              } catch {
+                  Write-Host "Retry $retries - waiting for IP..."
+              }
+              
+              Start-Sleep -Seconds 3
               $retries++
           }
           
+          if (-not $tsIP) {
+              Write-Warning "Could not get Tailscale IP after 20 retries"
+              $tsIP = "NOT_ASSIGNED"
+          }
+          
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
+          Write-Host "Tailscale IP: $tsIP"
 
       - name: Keep Alive
         run: |
@@ -164,20 +168,11 @@ jobs:
           Write-Host "       RDP SERVER READY"
           Write-Host "========================================="
           Write-Host "IP: $env:TAILSCALE_IP"
-          Write-Host "Users: User1 - User300"
+          Write-Host "Users: User1-User300"
           Write-Host "Password: NONE (blank)"
           Write-Host ""
-          Write-Host "All 300 users have:"
-          Write-Host "  - Administrator privileges"
-          Write-Host "  - Remote Desktop access"
-          Write-Host "  - No password"
-          Write-Host ""
-          Write-Host "Software installed:"
-          Write-Host "  - Brave Browser (pinned)"
-          Write-Host "  - ExpressVPN"
-          Write-Host "  - Revo Uninstaller"
-          Write-Host ""
-          Write-Host "Both RARs extracted to C:\Users"
+          Write-Host "All 300 users have admin privileges"
+          Write-Host "Software: Brave, ExpressVPN, Revo"
           Write-Host "========================================="
           
           while ($true) { Start-Sleep -Seconds 300 }
