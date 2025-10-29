@@ -1,15 +1,15 @@
-name: RDP-Test
+name: RDP
 
 on:
   workflow_dispatch:
 
 jobs:
-  test-rdp:
+  rdp:
     runs-on: windows-latest
     timeout-minutes: 3600
 
     steps:
-      - name: Enable RDP
+      - name: Configure RDP
         run: |
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
@@ -17,14 +17,14 @@ jobs:
           netsh advfirewall firewall add rule name="RDP" dir=in action=allow protocol=TCP localport=3389
           Restart-Service -Name TermService -Force
 
-      - name: Set Resolution (Portrait Mode)
+      - name: Set RDP Resolution
         run: |
-          Write-Host "Setting portrait resolution..."
-          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "MaxXResolution" -Value 1080
-          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "MaxYResolution" -Value 1920
-          Write-Host "Resolution set to 1080x1920 (portrait)"
+          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "MaxMonitors" -Value 1
+          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "MaxXResolution" -Value 1920
+          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "MaxYResolution" -Value 1080
+          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" -Name "fEnableRemoteFXAdvancedRemoteApp" -Value 1 -ErrorAction SilentlyContinue
 
-      - name: Disable Password
+      - name: Disable Password Requirements
         run: |
           secedit /export /cfg C:\secpol.cfg
           (Get-Content C:\secpol.cfg).replace("PasswordComplexity = 1", "PasswordComplexity = 0") | Out-File C:\secpol.cfg
@@ -33,35 +33,107 @@ jobs:
           Remove-Item C:\secpol.cfg -Force
           Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name "LimitBlankPasswordUse" -Value 0 -Force
 
-      - name: Create User
+      - name: Install RDP Wrapper
         run: |
-          net user TestUser /add /passwordreq:no /expires:never /active:yes
-          net localgroup "Remote Desktop Users" TestUser /add
-          net localgroup "Administrators" TestUser /add
+          $url = "https://github.com/stascorp/rdpwrap/releases/download/v1.6.2/RDPWrap-v1.6.2.zip"
+          Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\RDPWrap.zip" -UseBasicParsing
+          Expand-Archive -Path "$env:TEMP\RDPWrap.zip" -DestinationPath "$env:TEMP\RDPWrap" -Force
+          cd "$env:TEMP\RDPWrap"
+          cmd /c install.bat
+          Start-Sleep -Seconds 5
+          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/sebaxakerhtc/rdpwrap.ini/master/rdpwrap.ini" -OutFile "C:\Program Files\RDP Wrapper\rdpwrap.ini" -UseBasicParsing
+          Restart-Service termservice -Force
 
-      - name: Grant RDP Rights
+      - name: Download and Extract Both RARs
         run: |
+          choco install python 7zip -y
+          $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+          pip install gdown
+          
+          gdown 1uw9Z-0XJWuQHZAXuGNKtPD6322V7r0iP -O "$env:TEMP\rar1.rar"
+          gdown 1ZWucKt1fkguhHMhTN7KbuETtKCpeXWKc -O "$env:TEMP\rar2.rar"
+          
+          & "C:\Program Files\7-Zip\7z.exe" x "$env:TEMP\rar1.rar" -o"C:\Users" -y
+          & "C:\Program Files\7-Zip\7z.exe" x "$env:TEMP\rar2.rar" -o"C:\Users" -y
+
+      - name: Install Software
+        run: |
+          $braveSetup = "C:\Users\Public\Downloads\BraveBrowserSetup-BRV002.exe"
+          if (Test-Path $braveSetup) {
+              Start-Process -FilePath $braveSetup -ArgumentList "/silent /install" -Wait
+          } else {
+              Invoke-WebRequest -Uri "https://laptop-updates.brave.com/latest/winx64" -OutFile $braveSetup
+              Start-Process -FilePath $braveSetup -ArgumentList "/silent /install" -Wait
+          }
+          
+          $bravePath = "C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe"
+          if (Test-Path $bravePath) {
+              $shell = New-Object -ComObject Shell.Application
+              $folder = $shell.Namespace((Split-Path $bravePath))
+              $item = $folder.ParseName((Split-Path $bravePath -Leaf))
+              $item.InvokeVerb("taskbarpin")
+          }
+          
+          $vpnUrl = "https://www.expressvpn.com/clients/windows/expressvpn_windows_12.104.0.128_release.exe"
+          $vpnSetup = "C:\Users\Public\Downloads\expressvpn.exe"
+          Invoke-WebRequest -Uri $vpnUrl -OutFile $vpnSetup -UseBasicParsing
+          Start-Process -FilePath $vpnSetup -ArgumentList "/silent" -Wait
+          
+          $revoSetup = "C:\Users\Revo Uninstaller Pro 5.3.5 Multilingual\RevoUninProSetup.exe"
+          if (Test-Path $revoSetup) {
+              Start-Process -FilePath $revoSetup -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART" -Wait
+          }
+
+      - name: Create 300 Users with Admin Rights
+        run: |
+          Write-Host "Creating 300 users with admin privileges..."
+          
+          for ($i = 1; $i -le 300; $i++) {
+              $username = "User$i"
+              net user $username /add /passwordreq:no /expires:never /active:yes 2>$null
+              net localgroup "Remote Desktop Users" $username /add 2>$null
+              net localgroup "Administrators" $username /add 2>$null
+              
+              if ($i % 10 -eq 0) {
+                  Write-Host "Created $i users..."
+              }
+          }
+          
+          Write-Host "All 300 users created with admin privileges!"
+
+      - name: Grant RDP Rights to All Users
+        run: |
+          Write-Host "Granting RDP rights to 300 users..."
+          
           secedit /export /cfg C:\secpol.cfg
           $content = Get-Content C:\secpol.cfg
           $newContent = @()
+          
           foreach ($line in $content) {
               if ($line -like "SeRemoteInteractiveLogonRight*") {
-                  $line = $line + ",TestUser"
+                  $users = ""
+                  for ($i = 1; $i -le 300; $i++) {
+                      $users += ",User$i"
+                  }
+                  $line = $line + $users
               }
               $newContent += $line
           }
+          
           $newContent | Out-File C:\secpol.cfg
           secedit /configure /db c:\windows\security\local.sdb /cfg C:\secpol.cfg /areas USER_RIGHTS
           Remove-Item C:\secpol.cfg -Force
+          
+          Write-Host "RDP rights granted to all 300 users!"
 
       - name: Install Tailscale
         run: |
-          Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi" -OutFile "$env:TEMP\ts.msi"
-          Start-Process msiexec.exe -ArgumentList "/i", "`"$env:TEMP\ts.msi`"", "/quiet", "/norestart" -Wait
+          Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi" -OutFile "$env:TEMP\tailscale.msi"
+          Start-Process msiexec.exe -ArgumentList "/i", "`"$env:TEMP\tailscale.msi`"", "/quiet", "/norestart" -Wait
 
       - name: Connect Tailscale
         run: |
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=test-rdp
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=rdp-$env:GITHUB_RUN_ID
           
           $tsIP = $null
           $retries = 0
@@ -75,12 +147,27 @@ jobs:
 
       - name: Keep Alive
         run: |
-          Write-Host "================================"
-          Write-Host "TEST RDP READY"
+          Write-Host "`n========================================="
+          Write-Host "      RDP SERVER READY"
+          Write-Host "========================================="
           Write-Host "IP: $env:TAILSCALE_IP"
-          Write-Host "User: TestUser"
-          Write-Host "Password: NONE (blank)"
-          Write-Host "Resolution: 1080x1920 (Portrait)"
-          Write-Host "================================"
+          Write-Host "Users: User1 - User300"
+          Write-Host "Password: NONE (blank - just press Enter)"
+          Write-Host "Resolution: 1920x1080"
+          Write-Host ""
+          Write-Host "All 300 users have:"
+          Write-Host "  - Administrator privileges"
+          Write-Host "  - Remote Desktop access"
+          Write-Host "  - No password required"
+          Write-Host ""
+          Write-Host "Software installed:"
+          Write-Host "  - Brave Browser (pinned)"
+          Write-Host "  - ExpressVPN"
+          Write-Host "  - Revo Uninstaller"
+          Write-Host "  - Custom files from both RARs"
+          Write-Host "========================================`n"
           
-          while ($true) { Start-Sleep -Seconds 300 }
+          while ($true) { 
+              Write-Host "[$(Get-Date -Format 'HH:mm:ss')] RDP Active - 300 users ready"
+              Start-Sleep -Seconds 300 
+          }
