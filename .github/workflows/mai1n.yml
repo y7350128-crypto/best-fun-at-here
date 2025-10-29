@@ -17,13 +17,6 @@ jobs:
           netsh advfirewall firewall add rule name="RDP" dir=in action=allow protocol=TCP localport=3389
           Restart-Service -Name TermService -Force
 
-      - name: Set RDP Resolution
-        run: |
-          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "MaxMonitors" -Value 1
-          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "MaxXResolution" -Value 1920
-          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "MaxYResolution" -Value 1080
-          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" -Name "fEnableRemoteFXAdvancedRemoteApp" -Value 1 -ErrorAction SilentlyContinue
-
       - name: Disable Password Requirements
         run: |
           secedit /export /cfg C:\secpol.cfg
@@ -46,22 +39,35 @@ jobs:
 
       - name: Download and Extract Both RARs
         run: |
+          Write-Host "Installing tools..."
           choco install python 7zip -y
           $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
           pip install gdown
           
+          Write-Host "`nDownloading RAR 1 (Default.rar)..."
           gdown 1uw9Z-0XJWuQHZAXuGNKtPD6322V7r0iP -O "$env:TEMP\rar1.rar"
+          
+          Write-Host "Downloading RAR 2..."
           gdown 1ZWucKt1fkguhHMhTN7KbuETtKCpeXWKc -O "$env:TEMP\rar2.rar"
           
+          Write-Host "`nExtracting RAR 1 to C:\Users..."
           & "C:\Program Files\7-Zip\7z.exe" x "$env:TEMP\rar1.rar" -o"C:\Users" -y
+          
+          Write-Host "Extracting RAR 2 to C:\Users..."
           & "C:\Program Files\7-Zip\7z.exe" x "$env:TEMP\rar2.rar" -o"C:\Users" -y
+          
+          Write-Host "`nBoth RARs extracted to C:\Users"
 
-      - name: Install Software
+      - name: Install Brave Browser and ExpressVPN
         run: |
+          Write-Host "Installing Brave Browser..."
+          
           $braveSetup = "C:\Users\Public\Downloads\BraveBrowserSetup-BRV002.exe"
           if (Test-Path $braveSetup) {
               Start-Process -FilePath $braveSetup -ArgumentList "/silent /install" -Wait
+              Write-Host "Brave installed"
           } else {
+              Write-Host "Brave setup not found, downloading..."
               Invoke-WebRequest -Uri "https://laptop-updates.brave.com/latest/winx64" -OutFile $braveSetup
               Start-Process -FilePath $braveSetup -ArgumentList "/silent /install" -Wait
           }
@@ -72,17 +78,24 @@ jobs:
               $folder = $shell.Namespace((Split-Path $bravePath))
               $item = $folder.ParseName((Split-Path $bravePath -Leaf))
               $item.InvokeVerb("taskbarpin")
+              Write-Host "Brave pinned to taskbar"
           }
           
+          Write-Host "`nDownloading and installing ExpressVPN..."
           $vpnUrl = "https://www.expressvpn.com/clients/windows/expressvpn_windows_12.104.0.128_release.exe"
           $vpnSetup = "C:\Users\Public\Downloads\expressvpn.exe"
           Invoke-WebRequest -Uri $vpnUrl -OutFile $vpnSetup -UseBasicParsing
           Start-Process -FilePath $vpnSetup -ArgumentList "/silent" -Wait
+          Write-Host "ExpressVPN installed"
           
+          Write-Host "`nInstalling Revo Uninstaller..."
           $revoSetup = "C:\Users\Revo Uninstaller Pro 5.3.5 Multilingual\RevoUninProSetup.exe"
           if (Test-Path $revoSetup) {
               Start-Process -FilePath $revoSetup -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART" -Wait
+              Write-Host "Revo Uninstaller installed"
           }
+          
+          Write-Host "`nAll software installed!"
 
       - name: Create 300 Users with Admin Rights
         run: |
@@ -94,16 +107,16 @@ jobs:
               net localgroup "Remote Desktop Users" $username /add 2>$null
               net localgroup "Administrators" $username /add 2>$null
               
-              if ($i % 10 -eq 0) {
+              if ($i % 25 -eq 0) {
                   Write-Host "Created $i users..."
               }
           }
           
           Write-Host "All 300 users created with admin privileges!"
 
-      - name: Grant RDP Rights to All Users
+      - name: Grant RDP Rights
         run: |
-          Write-Host "Granting RDP rights to 300 users..."
+          Write-Host "Granting RDP rights to all 300 users..."
           
           secedit /export /cfg C:\secpol.cfg
           $content = Get-Content C:\secpol.cfg
@@ -124,7 +137,7 @@ jobs:
           secedit /configure /db c:\windows\security\local.sdb /cfg C:\secpol.cfg /areas USER_RIGHTS
           Remove-Item C:\secpol.cfg -Force
           
-          Write-Host "RDP rights granted to all 300 users!"
+          Write-Host "RDP rights granted!"
 
       - name: Install Tailscale
         run: |
@@ -147,27 +160,24 @@ jobs:
 
       - name: Keep Alive
         run: |
-          Write-Host "`n========================================="
-          Write-Host "      RDP SERVER READY"
+          Write-Host "========================================="
+          Write-Host "       RDP SERVER READY"
           Write-Host "========================================="
           Write-Host "IP: $env:TAILSCALE_IP"
           Write-Host "Users: User1 - User300"
-          Write-Host "Password: NONE (blank - just press Enter)"
-          Write-Host "Resolution: 1920x1080"
+          Write-Host "Password: NONE (blank)"
           Write-Host ""
           Write-Host "All 300 users have:"
           Write-Host "  - Administrator privileges"
           Write-Host "  - Remote Desktop access"
-          Write-Host "  - No password required"
+          Write-Host "  - No password"
           Write-Host ""
           Write-Host "Software installed:"
           Write-Host "  - Brave Browser (pinned)"
           Write-Host "  - ExpressVPN"
           Write-Host "  - Revo Uninstaller"
-          Write-Host "  - Custom files from both RARs"
-          Write-Host "========================================`n"
+          Write-Host ""
+          Write-Host "Both RARs extracted to C:\Users"
+          Write-Host "========================================="
           
-          while ($true) { 
-              Write-Host "[$(Get-Date -Format 'HH:mm:ss')] RDP Active - 300 users ready"
-              Start-Sleep -Seconds 300 
-          }
+          while ($true) { Start-Sleep -Seconds 300 }
