@@ -75,70 +75,6 @@ jobs:
           secedit /configure /db c:\windows\security\local.sdb /cfg C:\secpol.cfg /areas USER_RIGHTS
           Remove-Item C:\secpol.cfg -Force
 
-      - name: Set Display Scaling to 400% for All Users
-        run: |
-          function Set-DpiScaling {
-              param(
-                  [string]$RegistryPath,
-                  [int]$DpiValue = 384  # 384 DPI = 400% scaling (96 * 4)
-              )
-              try {
-                  $desktopPath = Join-Path -Path $RegistryPath -ChildPath "Control Panel\Desktop"
-                  $metricsPath = Join-Path -Path $desktopPath -ChildPath "WindowMetrics"
-                  
-                  if (Test-Path -Path $desktopPath) {
-                      Set-ItemProperty -Path $desktopPath -Name "Win8DpiScaling" -Value 1 -Type DWord -Force -ErrorAction Stop
-                      Set-ItemProperty -Path $desktopPath -Name "LogPixels" -Value $DpiValue -Type DWord -Force -ErrorAction Stop
-                  }
-                  if (Test-Path -Path $metricsPath) {
-                      Set-ItemProperty -Path $metricsPath -Name "AppliedDPI" -Value $DpiValue -Type DWord -Force -ErrorAction Stop
-                  }
-                  Write-Host "Applied 400% DPI scaling to: $RegistryPath"
-              }
-              catch {
-                  Write-Warning "Could not apply DPI settings to '$RegistryPath'. Error: $($_.Exception.Message)"
-              }
-          }
-          
-          $loadedSids = Get-ChildItem "Registry::HKEY_USERS" | Where-Object { $_.Name -like "*S-1-5-21-*" } | ForEach-Object { $_.PSChildName }
-          foreach ($sid in $loadedSids) {
-              $userHivePath = "Registry::HKEY_USERS\$sid"
-              Set-DpiScaling -RegistryPath $userHivePath
-          }
-          
-          reg load "HKU\DefaultUser" "C:\Users\Default\NTUSER.DAT" 2>$null
-          Set-DpiScaling -RegistryPath "Registry::HKEY_USERS\DefaultUser"
-          reg unload "HKU\DefaultUser" 2>$null
-
-      - name: Set Desktop Icon Size to Large for All Users
-        run: |
-          function Set-IconSize {
-              param([string]$RegistryPath)
-              try {
-                  $shellBagsPath = Join-Path -Path $RegistryPath -ChildPath "Software\Microsoft\Windows\Shell\Bags\1\Desktop"
-                  
-                  if (-not (Test-Path $shellBagsPath)) {
-                      New-Item -Path $shellBagsPath -Force | Out-Null
-                  }
-                  
-                  Set-ItemProperty -Path $shellBagsPath -Name "IconSize" -Value 96 -Type DWord -Force
-                  Write-Host "Applied large icon size to: $RegistryPath"
-              }
-              catch {
-                  Write-Warning "Could not set icon size for '$RegistryPath'. Error: $($_.Exception.Message)"
-              }
-          }
-          
-          $loadedSids = Get-ChildItem "Registry::HKEY_USERS" | Where-Object { $_.Name -like "*S-1-5-21-*" } | ForEach-Object { $_.PSChildName }
-          foreach ($sid in $loadedSids) {
-              $userHivePath = "Registry::HKEY_USERS\$sid"
-              Set-IconSize -RegistryPath $userHivePath
-          }
-          
-          reg load "HKU\DefaultUser" "C:\Users\Default\NTUSER.DAT" 2>$null
-          Set-IconSize -RegistryPath "Registry::HKEY_USERS\DefaultUser"
-          reg unload "HKU\DefaultUser" 2>$null
-
       - name: Install Tailscale
         run: |
           Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi" -OutFile "$env:TEMP\tailscale.msi"
@@ -165,7 +101,6 @@ jobs:
           Write-Host "IP: $env:TAILSCALE_IP"
           Write-Host "Users: User1-User300"
           Write-Host "Password: NONE"
-          Write-Host "Display: 400% scaling, Large icons"
           Write-Host "========================================="
           
           while ($true) { Start-Sleep -Seconds 300 }
@@ -241,70 +176,6 @@ jobs:
           secedit /configure /db c:\windows\security\local.sdb /cfg C:\secpol.cfg /areas USER_RIGHTS
           Remove-Item C:\secpol.cfg -Force
 
-      - name: Set Display Scaling to 400% for All Users
-        run: |
-          function Set-DpiScaling {
-              param(
-                  [string]$RegistryPath,
-                  [int]$DpiValue = 384  # 384 DPI = 400% scaling (96 * 4)
-              )
-              try {
-                  $desktopPath = Join-Path -Path $RegistryPath -ChildPath "Control Panel\Desktop"
-                  $metricsPath = Join-Path -Path $desktopPath -ChildPath "WindowMetrics"
-                  
-                  if (Test-Path -Path $desktopPath) {
-                      Set-ItemProperty -Path $desktopPath -Name "Win8DpiScaling" -Value 1 -Type DWord -Force -ErrorAction Stop
-                      Set-ItemProperty -Path $desktopPath -Name "LogPixels" -Value $DpiValue -Type DWord -Force -ErrorAction Stop
-                  }
-                  if (Test-Path -Path $metricsPath) {
-                      Set-ItemProperty -Path $metricsPath -Name "AppliedDPI" -Value $DpiValue -Type DWord -Force -ErrorAction Stop
-                  }
-                  Write-Host "Applied 400% DPI scaling to: $RegistryPath"
-              }
-              catch {
-                  Write-Warning "Could not apply DPI settings to '$RegistryPath'. Error: $($_.Exception.Message)"
-              }
-          }
-          
-          $loadedSids = Get-ChildItem "Registry::HKEY_USERS" | Where-Object { $_.Name -like "*S-1-5-21-*" } | ForEach-Object { $_.PSChildName }
-          foreach ($sid in $loadedSids) {
-              $userHivePath = "Registry::HKEY_USERS\$sid"
-              Set-DpiScaling -RegistryPath $userHivePath
-          }
-          
-          reg load "HKU\DefaultUser" "C:\Users\Default\NTUSER.DAT" 2>$null
-          Set-DpiScaling -RegistryPath "Registry::HKEY_USERS\DefaultUser"
-          reg unload "HKU\DefaultUser" 2>$null
-
-      - name: Set Desktop Icon Size to Large for All Users
-        run: |
-          function Set-IconSize {
-              param([string]$RegistryPath)
-              try {
-                  $shellBagsPath = Join-Path -Path $RegistryPath -ChildPath "Software\Microsoft\Windows\Shell\Bags\1\Desktop"
-                  
-                  if (-not (Test-Path $shellBagsPath)) {
-                      New-Item -Path $shellBagsPath -Force | Out-Null
-                  }
-                  
-                  Set-ItemProperty -Path $shellBagsPath -Name "IconSize" -Value 96 -Type DWord -Force
-                  Write-Host "Applied large icon size to: $RegistryPath"
-              }
-              catch {
-                  Write-Warning "Could not set icon size for '$RegistryPath'. Error: $($_.Exception.Message)"
-              }
-          }
-          
-          $loadedSids = Get-ChildItem "Registry::HKEY_USERS" | Where-Object { $_.Name -like "*S-1-5-21-*" } | ForEach-Object { $_.PSChildName }
-          foreach ($sid in $loadedSids) {
-              $userHivePath = "Registry::HKEY_USERS\$sid"
-              Set-IconSize -RegistryPath $userHivePath
-          }
-          
-          reg load "HKU\DefaultUser" "C:\Users\Default\NTUSER.DAT" 2>$null
-          Set-IconSize -RegistryPath "Registry::HKEY_USERS\DefaultUser"
-          reg unload "HKU\DefaultUser" 2>$null
-
       - name: Install Tailscale
         run: |
           Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi" -OutFile "$env:TEMP\tailscale.msi"
@@ -331,7 +202,6 @@ jobs:
           Write-Host "IP: $env:TAILSCALE_IP"
           Write-Host "Users: User1-User300"
           Write-Host "Password: NONE"
-          Write-Host "Display: 400% scaling, Large icons"
           Write-Host "========================================="
           
           while ($true) { Start-Sleep -Seconds 300 }
