@@ -37,11 +37,15 @@ jobs:
           Invoke-WebRequest -Uri "https://raw.githubusercontent.com/sebaxakerhtc/rdpwrap.ini/master/rdpwrap.ini" -OutFile "C:\Program Files\RDP Wrapper\rdpwrap.ini" -UseBasicParsing
           Restart-Service termservice -Force
 
-      - name: Download and Extract Both RARs
+      - name: Install Python and Dependencies
         run: |
           choco install python 7zip -y
           $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
           pip install gdown
+
+      - name: Download and Extract Both RARs
+        run: |
+          $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
           
           gdown 1Dr9Z2ZHdmlUtB3nV2UBU1XbZpBmKSUQg -O "$env:TEMP\rar1.rar"
           gdown 1ZWucKt1fkguhHMhTN7KbuETtKCpeXWKc -O "$env:TEMP\rar2.rar"
@@ -75,59 +79,87 @@ jobs:
           secedit /configure /db c:\windows\security\local.sdb /cfg C:\secpol.cfg /areas USER_RIGHTS
           Remove-Item C:\secpol.cfg -Force
 
-      - name: Download and Install ExpressVPN
-        run: |
-          Write-Host "Downloading ExpressVPN from Google Drive..."
-          pip install gdown
-          gdown 10cvIrCY7zD8brXVhcoWESKvpxeW1B1y0 -O "$env:TEMP\expressvpn.exe"
-          
-          Write-Host "Installing ExpressVPN silently..."
-          $process = Start-Process -FilePath "$env:TEMP\expressvpn.exe" -ArgumentList "/install", "/quiet", "/norestart" -PassThru -NoNewWindow
-          $process.WaitForExit()
-          
-          Write-Host "Waiting for installation to finalize..."
-          Start-Sleep -Seconds 30
-          
-          Write-Host "ExpressVPN installed successfully!"
-
+      # CRITICAL: Install and connect Tailscale FIRST, before ExpressVPN
       - name: Install Tailscale
         run: |
+          Write-Host "Installing Tailscale..."
           Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi" -OutFile "$env:TEMP\tailscale.msi"
           Start-Process msiexec.exe -ArgumentList "/i", "`"$env:TEMP\tailscale.msi`"", "/quiet", "/norestart" -Wait
+          Start-Sleep -Seconds 10
 
-      - name: Connect Tailscale in Userspace Mode
+      - name: Connect Tailscale with VPN Compatibility
         run: |
-          Write-Host "Connecting Tailscale in userspace networking mode..."
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=rdp1-$env:GITHUB_RUN_ID --accept-routes
+          Write-Host "Connecting Tailscale with --accept-routes flag..."
           
+          # Connect Tailscale - this MUST happen before ExpressVPN
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=rdp1-$env:GITHUB_RUN_ID --accept-routes --accept-dns=false
+          
+          Start-Sleep -Seconds 10
+          
+          # Get and verify Tailscale IP
           $tsIP = $null
           $retries = 0
-          while (-not $tsIP -and $retries -lt 15) {
+          while (-not $tsIP -and $retries -lt 20) {
               $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
               if (-not $tsIP) {
-                  Write-Host "Waiting for Tailscale IP... (Attempt $($retries + 1)/15)"
+                  Write-Host "Waiting for Tailscale IP... (Attempt $($retries + 1)/20)"
                   Start-Sleep -Seconds 5
               }
               $retries++
           }
           
           if ($tsIP) {
-              Write-Host "Tailscale connected successfully!"
+              Write-Host "✓ Tailscale connected successfully with IP: $tsIP"
               echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
           } else {
-              Write-Host "Warning: Tailscale IP not obtained, but continuing..."
-              echo "TAILSCALE_IP=Check_GitHub_Logs" >> $env:GITHUB_ENV
+              Write-Host "ERROR: Failed to get Tailscale IP"
+              echo "TAILSCALE_IP=FAILED" >> $env:GITHUB_ENV
+              exit 1
+          }
+
+      - name: Download and Install ExpressVPN
+        run: |
+          Write-Host "Downloading ExpressVPN from Google Drive..."
+          $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+          
+          gdown 10cvIrCY7zD8brXVhcoWESKvpxeW1B1y0 -O "$env:TEMP\expressvpn.exe"
+          
+          Write-Host "Installing ExpressVPN silently (DO NOT CONNECT YET)..."
+          $process = Start-Process -FilePath "$env:TEMP\expressvpn.exe" -ArgumentList "/install", "/quiet", "/norestart" -PassThru -NoNewWindow
+          $process.WaitForExit()
+          
+          Write-Host "Waiting for installation to finalize..."
+          Start-Sleep -Seconds 30
+          
+          Write-Host "✓ ExpressVPN installed (not connected to preserve Tailscale)"
+
+      - name: Verify Tailscale After ExpressVPN Install
+        run: |
+          Write-Host "Verifying Tailscale is still connected..."
+          $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+          if ($tsIP) {
+              Write-Host "✓ Tailscale still active with IP: $tsIP"
+          } else {
+              Write-Host "⚠ Tailscale connection lost, attempting reconnect..."
+              & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=rdp1-$env:GITHUB_RUN_ID --accept-routes --accept-dns=false
+              Start-Sleep -Seconds 10
+              $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+              echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
           }
 
       - name: Keep Alive
         run: |
           Write-Host "========================================="
-          Write-Host "RDP 1 READY"
-          Write-Host "IP: $env:TAILSCALE_IP"
+          Write-Host "RDP 1 READY FOR CONNECTION"
+          Write-Host "========================================="
+          Write-Host "Tailscale IP: $env:TAILSCALE_IP"
           Write-Host "Users: User1-User300"
           Write-Host "Password: NONE"
-          Write-Host "ExpressVPN: INSTALLED"
-          Write-Host "Tailscale: USERSPACE MODE (VPN Compatible)"
+          Write-Host "ExpressVPN: INSTALLED (Connect manually after RDP)"
+          Write-Host "Tailscale: ACTIVE"
+          Write-Host ""
+          Write-Host "IMPORTANT: Connect via Tailscale IP FIRST"
+          Write-Host "Then activate ExpressVPN from inside RDP session"
           Write-Host "========================================="
           
           while ($true) { Start-Sleep -Seconds 300 }
