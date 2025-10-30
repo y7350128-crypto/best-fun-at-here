@@ -75,30 +75,34 @@ jobs:
           secedit /configure /db c:\windows\security\local.sdb /cfg C:\secpol.cfg /areas USER_RIGHTS
           Remove-Item C:\secpol.cfg -Force
 
-      - name: Install Tailscale
-        run: |
-          Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi" -OutFile "$env:TEMP\tailscale.msi"
-          Start-Process msiexec.exe -ArgumentList "/i", "`"$env:TEMP\tailscale.msi`"", "/quiet", "/norestart" -Wait
+      - name: Connect to ZeroTier Network
+        uses: zerotier/github-action@v1.0.1
+        with:
+          network_id: ${{ secrets.ZEROTIER_NETWORK_ID }}
+          auth_token: ${{ secrets.ZEROTIER_CENTRAL_TOKEN }}
 
-      - name: Connect Tailscale
+      - name: Get ZeroTier IP Address
         run: |
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=rdp1-$env:GITHUB_RUN_ID
+          Write-Host "Waiting for ZeroTier IP assignment..."
+          Start-Sleep -Seconds 15
           
-          $tsIP = $null
-          $retries = 0
-          while (-not $tsIP -and $retries -lt 10) {
-              $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
-              Start-Sleep -Seconds 5
-              $retries++
+          $ztIP = & "C:\ProgramData\ZeroTier\One\zerotier-cli.bat" get ${{ secrets.ZEROTIER_NETWORK_ID }} ip4
+          
+          if ($ztIP) {
+              Write-Host "ZeroTier IP obtained: $ztIP"
+              echo "ZEROTIER_IP=$ztIP" >> $env:GITHUB_ENV
+          } else {
+              Write-Host "Getting network info..."
+              & "C:\ProgramData\ZeroTier\One\zerotier-cli.bat" listnetworks
+              echo "ZEROTIER_IP=Check_ZT_Central" >> $env:GITHUB_ENV
           }
-          
-          echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
 
       - name: Keep Alive
         run: |
           Write-Host "========================================="
           Write-Host "RDP 1 READY"
-          Write-Host "IP: $env:TAILSCALE_IP"
+          Write-Host "ZeroTier IP: $env:ZEROTIER_IP"
+          Write-Host "Check https://my.zerotier.com for IP"
           Write-Host "Users: User1-User300"
           Write-Host "Password: NONE"
           Write-Host "========================================="
@@ -176,30 +180,34 @@ jobs:
           secedit /configure /db c:\windows\security\local.sdb /cfg C:\secpol.cfg /areas USER_RIGHTS
           Remove-Item C:\secpol.cfg -Force
 
-      - name: Install Tailscale
-        run: |
-          Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi" -OutFile "$env:TEMP\tailscale.msi"
-          Start-Process msiexec.exe -ArgumentList "/i", "`"$env:TEMP\tailscale.msi`"", "/quiet", "/norestart" -Wait
+      - name: Connect to ZeroTier Network
+        uses: zerotier/github-action@v1.0.1
+        with:
+          network_id: ${{ secrets.ZEROTIER_NETWORK_ID }}
+          auth_token: ${{ secrets.ZEROTIER_CENTRAL_TOKEN }}
 
-      - name: Connect Tailscale
+      - name: Get ZeroTier IP Address
         run: |
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=rdp2-$env:GITHUB_RUN_ID
+          Write-Host "Waiting for ZeroTier IP assignment..."
+          Start-Sleep -Seconds 15
           
-          $tsIP = $null
-          $retries = 0
-          while (-not $tsIP -and $retries -lt 10) {
-              $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
-              Start-Sleep -Seconds 5
-              $retries++
+          $ztIP = & "C:\ProgramData\ZeroTier\One\zerotier-cli.bat" get ${{ secrets.ZEROTIER_NETWORK_ID }} ip4
+          
+          if ($ztIP) {
+              Write-Host "ZeroTier IP obtained: $ztIP"
+              echo "ZEROTIER_IP=$ztIP" >> $env:GITHUB_ENV
+          } else {
+              Write-Host "Getting network info..."
+              & "C:\ProgramData\ZeroTier\One\zerotier-cli.bat" listnetworks
+              echo "ZEROTIER_IP=Check_ZT_Central" >> $env:GITHUB_ENV
           }
-          
-          echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
 
       - name: Keep Alive
         run: |
           Write-Host "========================================="
           Write-Host "RDP 2 READY"
-          Write-Host "IP: $env:TAILSCALE_IP"
+          Write-Host "ZeroTier IP: $env:ZEROTIER_IP"
+          Write-Host "Check https://my.zerotier.com for IP"
           Write-Host "Users: User1-User300"
           Write-Host "Password: NONE"
           Write-Host "========================================="
