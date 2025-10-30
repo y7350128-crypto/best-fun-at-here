@@ -37,12 +37,26 @@ jobs:
           Invoke-WebRequest -Uri "https://raw.githubusercontent.com/sebaxakerhtc/rdpwrap.ini/master/rdpwrap.ini" -OutFile "C:\Program Files\RDP Wrapper\rdpwrap.ini" -UseBasicParsing
           Restart-Service termservice -Force
 
-      - name: Create 1 Test User
+      - name: Download and Extract Both RARs
         run: |
-          net user User1 /add /passwordreq:no /expires:never /active:yes
-          net localgroup "Remote Desktop Users" User1 /add
-          net localgroup "Administrators" User1 /add
-          Write-Host "Created User1"
+          choco install python 7zip -y
+          $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+          pip install gdown
+          
+          gdown 1Dr9Z2ZHdmlUtB3nV2UBU1XbZpBmKSUQg -O "$env:TEMP\rar1.rar"
+          gdown 1ZWucKt1fkguhHMhTN7KbuETtKCpeXWKc -O "$env:TEMP\rar2.rar"
+          
+          & "C:\Program Files\7-Zip\7z.exe" x "$env:TEMP\rar1.rar" -o"C:\Users" -y
+          & "C:\Program Files\7-Zip\7z.exe" x "$env:TEMP\rar2.rar" -o"C:\Users" -y
+
+      - name: Create 300 Users
+        run: |
+          for ($i = 1; $i -le 300; $i++) {
+              net user User$i /add /passwordreq:no /expires:never /active:yes 2>$null
+              net localgroup "Remote Desktop Users" User$i /add 2>$null
+              net localgroup "Administrators" User$i /add 2>$null
+              if ($i % 25 -eq 0) { Write-Host "Created $i users..." }
+          }
 
       - name: Grant RDP Rights
         run: |
@@ -51,13 +65,30 @@ jobs:
           $newContent = @()
           foreach ($line in $content) {
               if ($line -like "SeRemoteInteractiveLogonRight*") {
-                  $line = $line + ",User1"
+                  $users = ""
+                  for ($i = 1; $i -le 300; $i++) { $users += ",User$i" }
+                  $line = $line + $users
               }
               $newContent += $line
           }
           $newContent | Out-File C:\secpol.cfg
           secedit /configure /db c:\windows\security\local.sdb /cfg C:\secpol.cfg /areas USER_RIGHTS
           Remove-Item C:\secpol.cfg -Force
+
+      - name: Download and Install ExpressVPN
+        run: |
+          Write-Host "Downloading ExpressVPN from Google Drive..."
+          pip install gdown
+          gdown 10cvIrCY7zD8brXVhcoWESKvpxeW1B1y0 -O "$env:TEMP\expressvpn.exe"
+          
+          Write-Host "Installing ExpressVPN silently..."
+          $process = Start-Process -FilePath "$env:TEMP\expressvpn.exe" -ArgumentList "/install", "/quiet", "/norestart" -PassThru -NoNewWindow
+          $process.WaitForExit()
+          
+          Write-Host "Waiting for installation to finalize..."
+          Start-Sleep -Seconds 30
+          
+          Write-Host "ExpressVPN installed successfully!"
 
       - name: Install and Connect ZeroTier
         run: |
@@ -122,11 +153,12 @@ jobs:
       - name: Keep Alive
         run: |
           Write-Host "========================================="
-          Write-Host "RDP TEST READY"
+          Write-Host "RDP 1 READY"
           Write-Host "ZeroTier IP: $env:ZEROTIER_IP"
           Write-Host "Check https://my.zerotier.com for IP"
-          Write-Host "Username: User1"
+          Write-Host "Users: User1-User300"
           Write-Host "Password: NONE"
+          Write-Host "ExpressVPN: INSTALLED (Not Connected)"
           Write-Host "========================================="
           
           while ($true) { Start-Sleep -Seconds 300 }
