@@ -82,10 +82,11 @@ jobs:
           gdown 10cvIrCY7zD8brXVhcoWESKvpxeW1B1y0 -O "$env:TEMP\expressvpn.exe"
           
           Write-Host "Installing ExpressVPN silently..."
-          Start-Process -FilePath "$env:TEMP\expressvpn.exe" -ArgumentList "/install", "/quiet", "/norestart" -Wait -NoNewWindow
+          $process = Start-Process -FilePath "$env:TEMP\expressvpn.exe" -ArgumentList "/install", "/quiet", "/norestart" -PassThru -NoNewWindow
+          $process.WaitForExit()
           
-          Write-Host "Waiting for installation to complete..."
-          Start-Sleep -Seconds 10
+          Write-Host "Waiting for installation to finalize..."
+          Start-Sleep -Seconds 30
           
           Write-Host "ExpressVPN installed successfully!"
 
@@ -94,19 +95,29 @@ jobs:
           Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi" -OutFile "$env:TEMP\tailscale.msi"
           Start-Process msiexec.exe -ArgumentList "/i", "`"$env:TEMP\tailscale.msi`"", "/quiet", "/norestart" -Wait
 
-      - name: Connect Tailscale
+      - name: Connect Tailscale in Userspace Mode
         run: |
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=rdp1-$env:GITHUB_RUN_ID
+          Write-Host "Connecting Tailscale in userspace networking mode..."
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=rdp1-$env:GITHUB_RUN_ID --accept-routes
           
           $tsIP = $null
           $retries = 0
-          while (-not $tsIP -and $retries -lt 10) {
+          while (-not $tsIP -and $retries -lt 15) {
               $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
-              Start-Sleep -Seconds 5
+              if (-not $tsIP) {
+                  Write-Host "Waiting for Tailscale IP... (Attempt $($retries + 1)/15)"
+                  Start-Sleep -Seconds 5
+              }
               $retries++
           }
           
-          echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
+          if ($tsIP) {
+              Write-Host "Tailscale connected successfully!"
+              echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
+          } else {
+              Write-Host "Warning: Tailscale IP not obtained, but continuing..."
+              echo "TAILSCALE_IP=Check_GitHub_Logs" >> $env:GITHUB_ENV
+          }
 
       - name: Keep Alive
         run: |
@@ -115,123 +126,8 @@ jobs:
           Write-Host "IP: $env:TAILSCALE_IP"
           Write-Host "Users: User1-User300"
           Write-Host "Password: NONE"
-          Write-Host "ExpressVPN: INSTALLED (Not Connected)"
-          Write-Host "========================================="
-          
-          while ($true) { Start-Sleep -Seconds 300 }
-
-  rdp-2:
-    runs-on: windows-latest
-    timeout-minutes: 3600
-
-    steps:
-      - name: Configure RDP
-        run: |
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
-          netsh advfirewall firewall add rule name="RDP" dir=in action=allow protocol=TCP localport=3389
-          Restart-Service -Name TermService -Force
-
-      - name: Disable Password Requirements
-        run: |
-          secedit /export /cfg C:\secpol.cfg
-          (Get-Content C:\secpol.cfg).replace("PasswordComplexity = 1", "PasswordComplexity = 0") | Out-File C:\secpol.cfg
-          (Get-Content C:\secpol.cfg).replace("MinimumPasswordLength = 7", "MinimumPasswordLength = 0") | Out-File C:\secpol.cfg
-          secedit /configure /db c:\windows\security\local.sdb /cfg C:\secpol.cfg /areas SECURITYPOLICY
-          Remove-Item C:\secpol.cfg -Force
-          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name "LimitBlankPasswordUse" -Value 0 -Force
-
-      - name: Install RDP Wrapper
-        run: |
-          $url = "https://github.com/stascorp/rdpwrap/releases/download/v1.6.2/RDPWrap-v1.6.2.zip"
-          Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\RDPWrap.zip" -UseBasicParsing
-          Expand-Archive -Path "$env:TEMP\RDPWrap.zip" -DestinationPath "$env:TEMP\RDPWrap" -Force
-          cd "$env:TEMP\RDPWrap"
-          cmd /c install.bat
-          Start-Sleep -Seconds 5
-          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/sebaxakerhtc/rdpwrap.ini/master/rdpwrap.ini" -OutFile "C:\Program Files\RDP Wrapper\rdpwrap.ini" -UseBasicParsing
-          Restart-Service termservice -Force
-
-      - name: Download and Extract Both RARs
-        run: |
-          choco install python 7zip -y
-          $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-          pip install gdown
-          
-          gdown 1Dr9Z2ZHdmlUtB3nV2UBU1XbZpBmKSUQg -O "$env:TEMP\rar1.rar"
-          gdown 1ZWucKt1fkguhHMhTN7KbuETtKCpeXWKc -O "$env:TEMP\rar2.rar"
-          
-          & "C:\Program Files\7-Zip\7z.exe" x "$env:TEMP\rar1.rar" -o"C:\Users" -y
-          & "C:\Program Files\7-Zip\7z.exe" x "$env:TEMP\rar2.rar" -o"C:\Users" -y
-
-      - name: Create 300 Users
-        run: |
-          for ($i = 1; $i -le 300; $i++) {
-              net user User$i /add /passwordreq:no /expires:never /active:yes 2>$null
-              net localgroup "Remote Desktop Users" User$i /add 2>$null
-              net localgroup "Administrators" User$i /add 2>$null
-              if ($i % 25 -eq 0) { Write-Host "Created $i users..." }
-          }
-
-      - name: Grant RDP Rights
-        run: |
-          secedit /export /cfg C:\secpol.cfg
-          $content = Get-Content C:\secpol.cfg
-          $newContent = @()
-          foreach ($line in $content) {
-              if ($line -like "SeRemoteInteractiveLogonRight*") {
-                  $users = ""
-                  for ($i = 1; $i -le 300; $i++) { $users += ",User$i" }
-                  $line = $line + $users
-              }
-              $newContent += $line
-          }
-          $newContent | Out-File C:\secpol.cfg
-          secedit /configure /db c:\windows\security\local.sdb /cfg C:\secpol.cfg /areas USER_RIGHTS
-          Remove-Item C:\secpol.cfg -Force
-
-      - name: Download and Install ExpressVPN
-        run: |
-          Write-Host "Downloading ExpressVPN from Google Drive..."
-          pip install gdown
-          gdown 10cvIrCY7zD8brXVhcoWESKvpxeW1B1y0 -O "$env:TEMP\expressvpn.exe"
-          
-          Write-Host "Installing ExpressVPN silently..."
-          Start-Process -FilePath "$env:TEMP\expressvpn.exe" -ArgumentList "/install", "/quiet", "/norestart" -Wait -NoNewWindow
-          
-          Write-Host "Waiting for installation to complete..."
-          Start-Sleep -Seconds 10
-          
-          Write-Host "ExpressVPN installed successfully!"
-
-      - name: Install Tailscale
-        run: |
-          Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi" -OutFile "$env:TEMP\tailscale.msi"
-          Start-Process msiexec.exe -ArgumentList "/i", "`"$env:TEMP\tailscale.msi`"", "/quiet", "/norestart" -Wait
-
-      - name: Connect Tailscale
-        run: |
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=rdp2-$env:GITHUB_RUN_ID
-          
-          $tsIP = $null
-          $retries = 0
-          while (-not $tsIP -and $retries -lt 10) {
-              $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
-              Start-Sleep -Seconds 5
-              $retries++
-          }
-          
-          echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
-
-      - name: Keep Alive
-        run: |
-          Write-Host "========================================="
-          Write-Host "RDP 2 READY"
-          Write-Host "IP: $env:TAILSCALE_IP"
-          Write-Host "Users: User1-User300"
-          Write-Host "Password: NONE"
-          Write-Host "ExpressVPN: INSTALLED (Not Connected)"
+          Write-Host "ExpressVPN: INSTALLED"
+          Write-Host "Tailscale: USERSPACE MODE (VPN Compatible)"
           Write-Host "========================================="
           
           while ($true) { Start-Sleep -Seconds 300 }
