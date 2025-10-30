@@ -37,26 +37,12 @@ jobs:
           Invoke-WebRequest -Uri "https://raw.githubusercontent.com/sebaxakerhtc/rdpwrap.ini/master/rdpwrap.ini" -OutFile "C:\Program Files\RDP Wrapper\rdpwrap.ini" -UseBasicParsing
           Restart-Service termservice -Force
 
-      - name: Download and Extract Both RARs
+      - name: Create 1 Test User
         run: |
-          choco install python 7zip -y
-          $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-          pip install gdown
-          
-          gdown 1Dr9Z2ZHdmlUtB3nV2UBU1XbZpBmKSUQg -O "$env:TEMP\rar1.rar"
-          gdown 1ZWucKt1fkguhHMhTN7KbuETtKCpeXWKc -O "$env:TEMP\rar2.rar"
-          
-          & "C:\Program Files\7-Zip\7z.exe" x "$env:TEMP\rar1.rar" -o"C:\Users" -y
-          & "C:\Program Files\7-Zip\7z.exe" x "$env:TEMP\rar2.rar" -o"C:\Users" -y
-
-      - name: Create 300 Users
-        run: |
-          for ($i = 1; $i -le 300; $i++) {
-              net user User$i /add /passwordreq:no /expires:never /active:yes 2>$null
-              net localgroup "Remote Desktop Users" User$i /add 2>$null
-              net localgroup "Administrators" User$i /add 2>$null
-              if ($i % 25 -eq 0) { Write-Host "Created $i users..." }
-          }
+          net user User1 /add /passwordreq:no /expires:never /active:yes
+          net localgroup "Remote Desktop Users" User1 /add
+          net localgroup "Administrators" User1 /add
+          Write-Host "Created User1"
 
       - name: Grant RDP Rights
         run: |
@@ -65,9 +51,7 @@ jobs:
           $newContent = @()
           foreach ($line in $content) {
               if ($line -like "SeRemoteInteractiveLogonRight*") {
-                  $users = ""
-                  for ($i = 1; $i -le 300; $i++) { $users += ",User$i" }
-                  $line = $line + $users
+                  $line = $line + ",User1"
               }
               $newContent += $line
           }
@@ -75,140 +59,73 @@ jobs:
           secedit /configure /db c:\windows\security\local.sdb /cfg C:\secpol.cfg /areas USER_RIGHTS
           Remove-Item C:\secpol.cfg -Force
 
-      - name: Connect to ZeroTier Network
-        uses: zerotier/github-action@v1.0.1
-        with:
-          network_id: ${{ secrets.ZEROTIER_NETWORK_ID }}
-          auth_token: ${{ secrets.ZEROTIER_CENTRAL_TOKEN }}
-
-      - name: Get ZeroTier IP Address
+      - name: Install and Connect ZeroTier
         run: |
-          Write-Host "Waiting for ZeroTier IP assignment..."
-          Start-Sleep -Seconds 15
+          Write-Host "Downloading ZeroTier..."
+          Invoke-WebRequest -Uri "https://download.zerotier.com/dist/ZeroTier%20One.msi" -OutFile "$env:TEMP\zerotier.msi"
           
-          $ztIP = & "C:\ProgramData\ZeroTier\One\zerotier-cli.bat" get ${{ secrets.ZEROTIER_NETWORK_ID }} ip4
+          Write-Host "Installing ZeroTier..."
+          Start-Process msiexec.exe -ArgumentList "/i", "`"$env:TEMP\zerotier.msi`"", "/quiet", "/norestart" -Wait
           
-          if ($ztIP) {
-              Write-Host "ZeroTier IP obtained: $ztIP"
-              echo "ZEROTIER_IP=$ztIP" >> $env:GITHUB_ENV
-          } else {
-              Write-Host "Getting network info..."
-              & "C:\ProgramData\ZeroTier\One\zerotier-cli.bat" listnetworks
-              echo "ZEROTIER_IP=Check_ZT_Central" >> $env:GITHUB_ENV
+          Write-Host "Waiting for ZeroTier service to start..."
+          Start-Sleep -Seconds 20
+          
+          Write-Host "Joining ZeroTier network..."
+          & "C:\Program Files (x86)\ZeroTier\One\zerotier-cli.bat" join ${{ secrets.ZEROTIER_NETWORK_ID }}
+          
+          Write-Host "Authorizing with API token..."
+          $networkId = "${{ secrets.ZEROTIER_NETWORK_ID }}"
+          $token = "${{ secrets.ZEROTIER_CENTRAL_TOKEN }}"
+          
+          Start-Sleep -Seconds 10
+          
+          # Get node ID
+          $nodeId = & "C:\Program Files (x86)\ZeroTier\One\zerotier-cli.bat" info | Select-String -Pattern "([0-9a-f]{10})" | ForEach-Object { $_.Matches[0].Value }
+          
+          Write-Host "Node ID: $nodeId"
+          
+          # Auto-authorize via API
+          $headers = @{
+              "Authorization" = "token $token"
           }
-
-      - name: Keep Alive
-        run: |
-          Write-Host "========================================="
-          Write-Host "RDP 1 READY"
-          Write-Host "ZeroTier IP: $env:ZEROTIER_IP"
-          Write-Host "Check https://my.zerotier.com for IP"
-          Write-Host "Users: User1-User300"
-          Write-Host "Password: NONE"
-          Write-Host "========================================="
           
-          while ($true) { Start-Sleep -Seconds 300 }
-
-  rdp-2:
-    runs-on: windows-latest
-    timeout-minutes: 3600
-
-    steps:
-      - name: Configure RDP
-        run: |
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
-          netsh advfirewall firewall add rule name="RDP" dir=in action=allow protocol=TCP localport=3389
-          Restart-Service -Name TermService -Force
-
-      - name: Disable Password Requirements
-        run: |
-          secedit /export /cfg C:\secpol.cfg
-          (Get-Content C:\secpol.cfg).replace("PasswordComplexity = 1", "PasswordComplexity = 0") | Out-File C:\secpol.cfg
-          (Get-Content C:\secpol.cfg).replace("MinimumPasswordLength = 7", "MinimumPasswordLength = 0") | Out-File C:\secpol.cfg
-          secedit /configure /db c:\windows\security\local.sdb /cfg C:\secpol.cfg /areas SECURITYPOLICY
-          Remove-Item C:\secpol.cfg -Force
-          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name "LimitBlankPasswordUse" -Value 0 -Force
-
-      - name: Install RDP Wrapper
-        run: |
-          $url = "https://github.com/stascorp/rdpwrap/releases/download/v1.6.2/RDPWrap-v1.6.2.zip"
-          Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\RDPWrap.zip" -UseBasicParsing
-          Expand-Archive -Path "$env:TEMP\RDPWrap.zip" -DestinationPath "$env:TEMP\RDPWrap" -Force
-          cd "$env:TEMP\RDPWrap"
-          cmd /c install.bat
-          Start-Sleep -Seconds 5
-          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/sebaxakerhtc/rdpwrap.ini/master/rdpwrap.ini" -OutFile "C:\Program Files\RDP Wrapper\rdpwrap.ini" -UseBasicParsing
-          Restart-Service termservice -Force
-
-      - name: Download and Extract Both RARs
-        run: |
-          choco install python 7zip -y
-          $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-          pip install gdown
-          
-          gdown 1Dr9Z2ZHdmlUtB3nV2UBU1XbZpBmKSUQg -O "$env:TEMP\rar1.rar"
-          gdown 1ZWucKt1fkguhHMhTN7KbuETtKCpeXWKc -O "$env:TEMP\rar2.rar"
-          
-          & "C:\Program Files\7-Zip\7z.exe" x "$env:TEMP\rar1.rar" -o"C:\Users" -y
-          & "C:\Program Files\7-Zip\7z.exe" x "$env:TEMP\rar2.rar" -o"C:\Users" -y
-
-      - name: Create 300 Users
-        run: |
-          for ($i = 1; $i -le 300; $i++) {
-              net user User$i /add /passwordreq:no /expires:never /active:yes 2>$null
-              net localgroup "Remote Desktop Users" User$i /add 2>$null
-              net localgroup "Administrators" User$i /add 2>$null
-              if ($i % 25 -eq 0) { Write-Host "Created $i users..." }
-          }
-
-      - name: Grant RDP Rights
-        run: |
-          secedit /export /cfg C:\secpol.cfg
-          $content = Get-Content C:\secpol.cfg
-          $newContent = @()
-          foreach ($line in $content) {
-              if ($line -like "SeRemoteInteractiveLogonRight*") {
-                  $users = ""
-                  for ($i = 1; $i -le 300; $i++) { $users += ",User$i" }
-                  $line = $line + $users
+          $body = @{
+              "config" = @{
+                  "authorized" = $true
               }
-              $newContent += $line
+          } | ConvertTo-Json
+          
+          try {
+              Invoke-RestMethod -Uri "https://api.zerotier.com/api/v1/network/$networkId/member/$nodeId" -Method Post -Headers $headers -Body $body -ContentType "application/json"
+              Write-Host "Auto-authorized successfully!"
+          } catch {
+              Write-Host "Auto-authorization failed, manual authorization needed in ZeroTier Central"
           }
-          $newContent | Out-File C:\secpol.cfg
-          secedit /configure /db c:\windows\security\local.sdb /cfg C:\secpol.cfg /areas USER_RIGHTS
-          Remove-Item C:\secpol.cfg -Force
-
-      - name: Connect to ZeroTier Network
-        uses: zerotier/github-action@v1.0.1
-        with:
-          network_id: ${{ secrets.ZEROTIER_NETWORK_ID }}
-          auth_token: ${{ secrets.ZEROTIER_CENTRAL_TOKEN }}
+          
+          Start-Sleep -Seconds 15
 
       - name: Get ZeroTier IP Address
         run: |
-          Write-Host "Waiting for ZeroTier IP assignment..."
-          Start-Sleep -Seconds 15
+          Write-Host "Getting ZeroTier IP..."
           
-          $ztIP = & "C:\ProgramData\ZeroTier\One\zerotier-cli.bat" get ${{ secrets.ZEROTIER_NETWORK_ID }} ip4
+          $ztIP = & "C:\Program Files (x86)\ZeroTier\One\zerotier-cli.bat" listnetworks | Select-String -Pattern "(\d+\.\d+\.\d+\.\d+)" | ForEach-Object { $_.Matches[0].Value }
           
           if ($ztIP) {
-              Write-Host "ZeroTier IP obtained: $ztIP"
+              Write-Host "ZeroTier IP: $ztIP"
               echo "ZEROTIER_IP=$ztIP" >> $env:GITHUB_ENV
           } else {
-              Write-Host "Getting network info..."
-              & "C:\ProgramData\ZeroTier\One\zerotier-cli.bat" listnetworks
+              Write-Host "IP not assigned yet. Full network info:"
+              & "C:\Program Files (x86)\ZeroTier\One\zerotier-cli.bat" listnetworks
               echo "ZEROTIER_IP=Check_ZT_Central" >> $env:GITHUB_ENV
           }
 
       - name: Keep Alive
         run: |
           Write-Host "========================================="
-          Write-Host "RDP 2 READY"
+          Write-Host "RDP TEST READY"
           Write-Host "ZeroTier IP: $env:ZEROTIER_IP"
           Write-Host "Check https://my.zerotier.com for IP"
-          Write-Host "Users: User1-User300"
+          Write-Host "Username: User1"
           Write-Host "Password: NONE"
           Write-Host "========================================="
           
