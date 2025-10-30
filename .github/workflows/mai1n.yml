@@ -1,4 +1,4 @@
-name: RDP
+name: RDP-ExpressVPN-AutoReconnect
 
 on:
   workflow_dispatch:
@@ -79,7 +79,6 @@ jobs:
           secedit /configure /db c:\windows\security\local.sdb /cfg C:\secpol.cfg /areas USER_RIGHTS
           Remove-Item C:\secpol.cfg -Force
 
-      # CRITICAL: Install and connect Tailscale FIRST, before ExpressVPN
       - name: Install Tailscale
         run: |
           Write-Host "Installing Tailscale..."
@@ -87,65 +86,122 @@ jobs:
           Start-Process msiexec.exe -ArgumentList "/i", "`"$env:TEMP\tailscale.msi`"", "/quiet", "/norestart" -Wait
           Start-Sleep -Seconds 10
 
-      - name: Connect Tailscale with VPN Compatibility
+      - name: Connect Tailscale
         run: |
-          Write-Host "Connecting Tailscale with --accept-routes flag..."
-          
-          # Connect Tailscale - this MUST happen before ExpressVPN
+          Write-Host "Connecting Tailscale..."
           & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=rdp1-$env:GITHUB_RUN_ID --accept-routes --accept-dns=false
           
           Start-Sleep -Seconds 10
           
-          # Get and verify Tailscale IP
-          $tsIP = $null
-          $retries = 0
-          while (-not $tsIP -and $retries -lt 20) {
-              $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
-              if (-not $tsIP) {
-                  Write-Host "Waiting for Tailscale IP... (Attempt $($retries + 1)/20)"
-                  Start-Sleep -Seconds 5
-              }
-              $retries++
-          }
-          
+          $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
           if ($tsIP) {
-              Write-Host "✓ Tailscale connected successfully with IP: $tsIP"
+              Write-Host "✓ Tailscale connected: $tsIP"
               echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
           } else {
               Write-Host "ERROR: Failed to get Tailscale IP"
-              echo "TAILSCALE_IP=FAILED" >> $env:GITHUB_ENV
               exit 1
           }
 
-      - name: Download and Install ExpressVPN
+      - name: Create Tailscale Auto-Reconnect Service
         run: |
-          Write-Host "Downloading ExpressVPN from Google Drive..."
+          # Create aggressive reconnect script
+          $reconnectScript = @'
+$authKey = "${{ secrets.TAILSCALE_AUTH_KEY }}"
+$hostname = "rdp1-$env:GITHUB_RUN_ID"
+$logFile = "C:\tailscale_monitor.log"
+
+function Write-Log {
+    param($Message)
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    "$timestamp - $Message" | Out-File -FilePath $logFile -Append
+    Write-Host "$timestamp - $Message"
+}
+
+Write-Log "Tailscale Monitor Started"
+
+while ($true) {
+    try {
+        # Check if Tailscale is connected
+        $tsIP = & "C:\Program Files\Tailscale\tailscale.exe" ip -4 2>$null
+        
+        if (-not $tsIP -or $tsIP -eq "") {
+            Write-Log "Tailscale disconnected! Attempting reconnection..."
+            
+            # Try to reconnect
+            & "C:\Program Files\Tailscale\tailscale.exe" up --authkey=$authKey --hostname=$hostname --accept-routes --accept-dns=false 2>&1 | Out-Null
+            Start-Sleep -Seconds 10
+            
+            $tsIP = & "C:\Program Files\Tailscale\tailscale.exe" ip -4 2>$null
+            if ($tsIP) {
+                Write-Log "Successfully reconnected! IP: $tsIP"
+            } else {
+                Write-Log "Reconnection attempt failed, will retry..."
+            }
+        }
+        
+        # Check every 15 seconds
+        Start-Sleep -Seconds 15
+        
+    } catch {
+        Write-Log "Error in monitor loop: $_"
+        Start-Sleep -Seconds 15
+    }
+}
+'@
+          $reconnectScript | Out-File -FilePath "C:\tailscale_monitor.ps1" -Encoding UTF8
+          
+          Write-Host "✓ Auto-reconnect script created"
+
+      - name: Start Tailscale Monitor as Background Job
+        run: |
+          # Start monitor in background
+          Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File C:\tailscale_monitor.ps1"
+          Start-Sleep -Seconds 5
+          Write-Host "✓ Tailscale auto-reconnect monitor started"
+
+      - name: Download ExpressVPN Installer
+        run: |
+          Write-Host "Downloading ExpressVPN installer..."
           $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
           
-          gdown 10cvIrCY7zD8brXVhcoWESKvpxeW1B1y0 -O "$env:TEMP\expressvpn.exe"
-          
-          Write-Host "Installing ExpressVPN silently (DO NOT CONNECT YET)..."
-          $process = Start-Process -FilePath "$env:TEMP\expressvpn.exe" -ArgumentList "/install", "/quiet", "/norestart" -PassThru -NoNewWindow
-          $process.WaitForExit()
-          
-          Write-Host "Waiting for installation to finalize..."
-          Start-Sleep -Seconds 30
-          
-          Write-Host "✓ ExpressVPN installed (not connected to preserve Tailscale)"
+          gdown 10cvIrCY7zD8brXVhcoWESKvpxeW1B1y0 -O "C:\Users\Public\Desktop\ExpressVPN_Installer.exe"
+          Write-Host "✓ ExpressVPN installer on Desktop"
 
-      - name: Verify Tailscale After ExpressVPN Install
+      - name: Create Installation Instructions
         run: |
-          Write-Host "Verifying Tailscale is still connected..."
-          $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
-          if ($tsIP) {
-              Write-Host "✓ Tailscale still active with IP: $tsIP"
-          } else {
-              Write-Host "⚠ Tailscale connection lost, attempting reconnect..."
-              & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=rdp1-$env:GITHUB_RUN_ID --accept-routes --accept-dns=false
-              Start-Sleep -Seconds 10
-              $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
-              echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
-          }
+          $instructions = @"
+===========================================
+HOW TO INSTALL EXPRESSVPN WITHOUT LOSING ACCESS
+===========================================
+
+IMPORTANT: Tailscale has an AUTO-RECONNECT monitor running!
+
+INSTALLATION STEPS:
+1. Double-click ExpressVPN_Installer.exe on Desktop
+2. Your RDP connection WILL DISCONNECT during installation
+3. Wait 60-90 seconds for installation to complete
+4. Reconnect to the SAME Tailscale IP: $env:TAILSCALE_IP
+5. The auto-reconnect script will restore connection automatically
+
+WHAT'S RUNNING:
+✓ Tailscale Monitor (checks connection every 15 seconds)
+✓ Auto-reconnect on disconnect
+✓ Log file: C:\tailscale_monitor.log
+
+IF CONNECTION DOESN'T RESTORE:
+1. Wait 2 minutes for auto-reconnect
+2. Check C:\tailscale_monitor.log for status
+3. Manual reconnect: Run as Admin:
+   cd "C:\Program Files\Tailscale"
+   .\tailscale.exe up --accept-routes --accept-dns=false
+
+CURRENT TAILSCALE IP: $env:TAILSCALE_IP
+(Save this IP to reconnect after ExpressVPN install)
+
+===========================================
+"@
+          $instructions | Out-File -FilePath "C:\Users\Public\Desktop\INSTALL_EXPRESSVPN_INSTRUCTIONS.txt" -Encoding UTF8
+          Write-Host "✓ Installation instructions created"
 
       - name: Keep Alive
         run: |
@@ -155,11 +211,17 @@ jobs:
           Write-Host "Tailscale IP: $env:TAILSCALE_IP"
           Write-Host "Users: User1-User300"
           Write-Host "Password: NONE"
-          Write-Host "ExpressVPN: INSTALLED (Connect manually after RDP)"
-          Write-Host "Tailscale: ACTIVE"
           Write-Host ""
-          Write-Host "IMPORTANT: Connect via Tailscale IP FIRST"
-          Write-Host "Then activate ExpressVPN from inside RDP session"
+          Write-Host "EXPRESSVPN INSTALLER: On Desktop"
+          Write-Host "AUTO-RECONNECT: ACTIVE (checks every 15s)"
+          Write-Host ""
+          Write-Host "⚠ IMPORTANT:"
+          Write-Host "When you install ExpressVPN, connection will drop"
+          Write-Host "Wait 60-90 seconds, then reconnect to: $env:TAILSCALE_IP"
+          Write-Host "Auto-reconnect will restore Tailscale automatically"
+          Write-Host ""
+          Write-Host "Read: INSTALL_EXPRESSVPN_INSTRUCTIONS.txt on Desktop"
+          Write-Host "Monitor log: C:\tailscale_monitor.log"
           Write-Host "========================================="
           
           while ($true) { Start-Sleep -Seconds 300 }
