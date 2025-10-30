@@ -1,4 +1,4 @@
-name: RDP-ExpressVPN-AutoReconnect
+name: RDP-Test-Single-User
 
 on:
   workflow_dispatch:
@@ -6,28 +6,34 @@ on:
 jobs:
   rdp-1:
     runs-on: windows-latest
-    timeout-minutes: 3600
+    timeout-minutes: 360
 
     steps:
       - name: Configure RDP
         run: |
+          Write-Host "Configuring RDP settings..."
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
           netsh advfirewall firewall add rule name="RDP" dir=in action=allow protocol=TCP localport=3389
           Restart-Service -Name TermService -Force
+          Write-Host "✓ RDP configured"
 
       - name: Disable Password Requirements
         run: |
+          Write-Host "Disabling password requirements..."
           secedit /export /cfg C:\secpol.cfg
           (Get-Content C:\secpol.cfg).replace("PasswordComplexity = 1", "PasswordComplexity = 0") | Out-File C:\secpol.cfg
           (Get-Content C:\secpol.cfg).replace("MinimumPasswordLength = 7", "MinimumPasswordLength = 0") | Out-File C:\secpol.cfg
           secedit /configure /db c:\windows\security\local.sdb /cfg C:\secpol.cfg /areas SECURITYPOLICY
           Remove-Item C:\secpol.cfg -Force
           Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name "LimitBlankPasswordUse" -Value 0 -Force
+          Write-Host "✓ Password requirements disabled"
 
       - name: Install RDP Wrapper
         run: |
+          Write-Host "Installing RDP Wrapper..."
           $url = "https://github.com/stascorp/rdpwrap/releases/download/v1.6.2/RDPWrap-v1.6.2.zip"
           Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\RDPWrap.zip" -UseBasicParsing
           Expand-Archive -Path "$env:TEMP\RDPWrap.zip" -DestinationPath "$env:TEMP\RDPWrap" -Force
@@ -36,193 +42,176 @@ jobs:
           Start-Sleep -Seconds 5
           Invoke-WebRequest -Uri "https://raw.githubusercontent.com/sebaxakerhtc/rdpwrap.ini/master/rdpwrap.ini" -OutFile "C:\Program Files\RDP Wrapper\rdpwrap.ini" -UseBasicParsing
           Restart-Service termservice -Force
+          Write-Host "✓ RDP Wrapper installed"
 
-      - name: Install Python and Dependencies
+      - name: Create Test User
         run: |
-          choco install python 7zip -y
-          $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-          pip install gdown
+          Write-Host "Creating test user: TestUser1"
+          net user TestUser1 /add /passwordreq:no /expires:never /active:yes
+          net localgroup "Remote Desktop Users" TestUser1 /add
+          net localgroup "Administrators" TestUser1 /add
+          Write-Host "✓ Test user created: TestUser1 (no password)"
 
-      - name: Download and Extract Both RARs
-        run: |
-          $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-          
-          gdown 1Dr9Z2ZHdmlUtB3nV2UBU1XbZpBmKSUQg -O "$env:TEMP\rar1.rar"
-          gdown 1ZWucKt1fkguhHMhTN7KbuETtKCpeXWKc -O "$env:TEMP\rar2.rar"
-          
-          & "C:\Program Files\7-Zip\7z.exe" x "$env:TEMP\rar1.rar" -o"C:\Users" -y
-          & "C:\Program Files\7-Zip\7z.exe" x "$env:TEMP\rar2.rar" -o"C:\Users" -y
-
-      - name: Create 300 Users
-        run: |
-          for ($i = 1; $i -le 300; $i++) {
-              net user User$i /add /passwordreq:no /expires:never /active:yes 2>$null
-              net localgroup "Remote Desktop Users" User$i /add 2>$null
-              net localgroup "Administrators" User$i /add 2>$null
-              if ($i % 25 -eq 0) { Write-Host "Created $i users..." }
-          }
-
-      - name: Grant RDP Rights
+      - name: Grant RDP Rights to Test User
         run: |
           secedit /export /cfg C:\secpol.cfg
           $content = Get-Content C:\secpol.cfg
           $newContent = @()
           foreach ($line in $content) {
               if ($line -like "SeRemoteInteractiveLogonRight*") {
-                  $users = ""
-                  for ($i = 1; $i -le 300; $i++) { $users += ",User$i" }
-                  $line = $line + $users
+                  $line = $line + ",TestUser1"
               }
               $newContent += $line
           }
           $newContent | Out-File C:\secpol.cfg
           secedit /configure /db c:\windows\security\local.sdb /cfg C:\secpol.cfg /areas USER_RIGHTS
           Remove-Item C:\secpol.cfg -Force
+          Write-Host "✓ RDP rights granted to TestUser1"
 
       - name: Install Tailscale
         run: |
-          Write-Host "Installing Tailscale..."
+          Write-Host "Downloading Tailscale installer..."
           Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi" -OutFile "$env:TEMP\tailscale.msi"
+          
+          Write-Host "Installing Tailscale..."
           Start-Process msiexec.exe -ArgumentList "/i", "`"$env:TEMP\tailscale.msi`"", "/quiet", "/norestart" -Wait
-          Start-Sleep -Seconds 10
+          Write-Host "✓ Tailscale installed"
 
-      - name: Connect Tailscale
+      - name: Wait for Tailscale Service
         run: |
-          Write-Host "Connecting Tailscale..."
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=rdp1-$env:GITHUB_RUN_ID --accept-routes --accept-dns=false
+          Write-Host "Waiting for Tailscale service to be ready..."
+          $maxAttempts = 30
+          $attempt = 0
           
-          Start-Sleep -Seconds 10
+          while ($attempt -lt $maxAttempts) {
+              $service = Get-Service -Name "Tailscale" -ErrorAction SilentlyContinue
+              if ($service -and $service.Status -eq "Running") {
+                  Write-Host "✓ Tailscale service is running"
+                  break
+              }
+              $attempt++
+              Write-Host "Waiting for service... ($attempt/$maxAttempts)"
+              Start-Sleep -Seconds 2
+          }
           
-          $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
-          if ($tsIP) {
-              Write-Host "✓ Tailscale connected: $tsIP"
-              echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
-          } else {
-              Write-Host "ERROR: Failed to get Tailscale IP"
+          if ($attempt -eq $maxAttempts) {
+              Write-Host "ERROR: Tailscale service did not start"
               exit 1
           }
 
-      - name: Create Tailscale Auto-Reconnect Service
+      - name: Connect to Tailscale
         run: |
-          # Create aggressive reconnect script
-          $authKey = "${{ secrets.TAILSCALE_AUTH_KEY }}"
-          $hostname = "rdp1-$env:GITHUB_RUN_ID"
+          Write-Host "Connecting to Tailscale network..."
+          $tsPath = "$env:ProgramFiles\Tailscale\tailscale.exe"
           
-          $reconnectScript = @'
-$logFile = "C:\tailscale_monitor.log"
-
-function Write-Log {
-    param($Message)
-    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    "$timestamp - $Message" | Out-File -FilePath $logFile -Append
-    Write-Host "$timestamp - $Message"
-}
-
-Write-Log "Tailscale Monitor Started"
-
-while ($true) {
-    try {
-        # Check if Tailscale is connected
-        $tsIP = & "C:\Program Files\Tailscale\tailscale.exe" ip -4 2>$null
-        
-        if (-not $tsIP -or $tsIP -eq "") {
-            Write-Log "Tailscale disconnected! Attempting reconnection..."
-            
-            # Try to reconnect
-            & "C:\Program Files\Tailscale\tailscale.exe" up --authkey=$authKey --hostname=$hostname --accept-routes --accept-dns=false 2>&1 | Out-Null
-            Start-Sleep -Seconds 10
-            
-            $tsIP = & "C:\Program Files\Tailscale\tailscale.exe" ip -4 2>$null
-            if ($tsIP) {
-                Write-Log "Successfully reconnected! IP: $tsIP"
-            } else {
-                Write-Log "Reconnection attempt failed, will retry..."
-            }
-        }
-        
-        # Check every 15 seconds
-        Start-Sleep -Seconds 15
-        
-    } catch {
-        Write-Log "Error in monitor loop: $_"
-        Start-Sleep -Seconds 15
-    }
-}
-'@
-          $reconnectScript | Out-File -FilePath "C:\tailscale_monitor.ps1" -Encoding UTF8
+          if (-not (Test-Path $tsPath)) {
+              Write-Host "ERROR: Tailscale executable not found at $tsPath"
+              exit 1
+          }
           
-          Write-Host "✓ Auto-reconnect script created"
-
-      - name: Start Tailscale Monitor as Background Job
-        run: |
-          # Start monitor in background
-          Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File C:\tailscale_monitor.ps1"
-          Start-Sleep -Seconds 5
-          Write-Host "✓ Tailscale auto-reconnect monitor started"
-
-      - name: Download ExpressVPN Installer
-        run: |
-          Write-Host "Downloading ExpressVPN installer..."
-          $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+          Write-Host "Running: tailscale up..."
+          & $tsPath up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=rdp-test-$env:GITHUB_RUN_ID --accept-routes --accept-dns=false
           
-          gdown 10cvIrCY7zD8brXVhcoWESKvpxeW1B1y0 -O "C:\Users\Public\Desktop\ExpressVPN_Installer.exe"
-          Write-Host "✓ ExpressVPN installer on Desktop"
+          Write-Host "✓ Connection command executed"
 
-      - name: Create Installation Instructions
+      - name: Wait for Tailscale IP (Critical Step)
         run: |
-          $instructions = @"
-===========================================
-HOW TO INSTALL EXPRESSVPN WITHOUT LOSING ACCESS
-===========================================
+          Write-Host "Waiting for Tailscale to establish connection..."
+          Write-Host "This may take up to 3 minutes (DERP relay coordination)..."
+          
+          $tsPath = "$env:ProgramFiles\Tailscale\tailscale.exe"
+          $maxAttempts = 36  # 3 minutes (36 * 5 seconds)
+          $attempt = 0
+          $tsIP = $null
+          
+          while ($attempt -lt $maxAttempts) {
+              Start-Sleep -Seconds 5
+              $attempt++
+              
+              try {
+                  $tsIP = & $tsPath ip -4 2>&1
+                  
+                  if ($tsIP -and $tsIP -match '^\d+\.\d+\.\d+\.\d+$') {
+                      Write-Host "✓ Tailscale IP obtained: $tsIP"
+                      echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
+                      
+                      # Verify connectivity by checking status
+                      Write-Host "Verifying Tailscale status..."
+                      & $tsPath status
+                      
+                      break
+                  } else {
+                      if ($attempt % 6 -eq 0) {  # Log every 30 seconds
+                          Write-Host "Still waiting... (${attempt}0 seconds elapsed)"
+                      }
+                  }
+              } catch {
+                  if ($attempt % 6 -eq 0) {
+                      Write-Host "Still initializing... (${attempt}0 seconds elapsed)"
+                  }
+              }
+          }
+          
+          if (-not $tsIP -or $tsIP -notmatch '^\d+\.\d+\.\d+\.\d+$') {
+              Write-Host "ERROR: Failed to obtain Tailscale IP after 3 minutes"
+              Write-Host "Running diagnostics..."
+              & $tsPath status
+              exit 1
+          }
 
-IMPORTANT: Tailscale has an AUTO-RECONNECT monitor running!
+      - name: Test RDP Port
+        run: |
+          Write-Host "Testing if RDP port 3389 is listening..."
+          $listener = Get-NetTCPConnection -LocalPort 3389 -State Listen -ErrorAction SilentlyContinue
+          if ($listener) {
+              Write-Host "✓ RDP is listening on port 3389"
+          } else {
+              Write-Host "⚠ Warning: RDP might not be listening properly"
+          }
 
-INSTALLATION STEPS:
-1. Double-click ExpressVPN_Installer.exe on Desktop
-2. Your RDP connection WILL DISCONNECT during installation
-3. Wait 60-90 seconds for installation to complete
-4. Reconnect to the SAME Tailscale IP: $env:TAILSCALE_IP
-5. The auto-reconnect script will restore connection automatically
-
-WHAT'S RUNNING:
-✓ Tailscale Monitor (checks connection every 15 seconds)
-✓ Auto-reconnect on disconnect
-✓ Log file: C:\tailscale_monitor.log
-
-IF CONNECTION DOESN'T RESTORE:
-1. Wait 2 minutes for auto-reconnect
-2. Check C:\tailscale_monitor.log for status
-3. Manual reconnect: Run as Admin:
-   cd "C:\Program Files\Tailscale"
-   .\tailscale.exe up --accept-routes --accept-dns=false
-
-CURRENT TAILSCALE IP: $env:TAILSCALE_IP
-(Save this IP to reconnect after ExpressVPN install)
-
-===========================================
-"@
-          $instructions | Out-File -FilePath "C:\Users\Public\Desktop\INSTALL_EXPRESSVPN_INSTRUCTIONS.txt" -Encoding UTF8
-          Write-Host "✓ Installation instructions created"
+      - name: Display Connection Info
+        run: |
+          Write-Host ""
+          Write-Host "========================================="
+          Write-Host "    RDP SERVER READY FOR TESTING"
+          Write-Host "========================================="
+          Write-Host ""
+          Write-Host "CONNECTION DETAILS:"
+          Write-Host "  Tailscale IP: $env:TAILSCALE_IP"
+          Write-Host "  Username: TestUser1"
+          Write-Host "  Password: (none - leave blank)"
+          Write-Host "  Port: 3389 (default RDP)"
+          Write-Host ""
+          Write-Host "HOW TO CONNECT:"
+          Write-Host "  1. Make sure Tailscale is running on your device"
+          Write-Host "  2. Open Remote Desktop Connection"
+          Write-Host "  3. Enter: $env:TAILSCALE_IP"
+          Write-Host "  4. Username: TestUser1"
+          Write-Host "  5. Password: Leave blank / press Enter"
+          Write-Host ""
+          Write-Host "TROUBLESHOOTING:"
+          Write-Host "  - Can you ping $env:TAILSCALE_IP from terminal?"
+          Write-Host "  - Is Tailscale running on your local machine?"
+          Write-Host "  - Check Tailscale admin console for this device"
+          Write-Host ""
+          Write-Host "========================================="
+          Write-Host ""
+          
+          # Show Tailscale status for debugging
+          Write-Host "Tailscale Status:"
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" status
 
       - name: Keep Alive
         run: |
-          Write-Host "========================================="
-          Write-Host "RDP 1 READY FOR CONNECTION"
-          Write-Host "========================================="
-          Write-Host "Tailscale IP: $env:TAILSCALE_IP"
-          Write-Host "Users: User1-User300"
-          Write-Host "Password: NONE"
+          Write-Host "Server will stay alive for 6 hours..."
+          Write-Host "Press Ctrl+C in GitHub Actions UI to stop early"
           Write-Host ""
-          Write-Host "EXPRESSVPN INSTALLER: On Desktop"
-          Write-Host "AUTO-RECONNECT: ACTIVE (checks every 15s)"
-          Write-Host ""
-          Write-Host "⚠ IMPORTANT:"
-          Write-Host "When you install ExpressVPN, connection will drop"
-          Write-Host "Wait 60-90 seconds, then reconnect to: $env:TAILSCALE_IP"
-          Write-Host "Auto-reconnect will restore Tailscale automatically"
-          Write-Host ""
-          Write-Host "Read: INSTALL_EXPRESSVPN_INSTRUCTIONS.txt on Desktop"
-          Write-Host "Monitor log: C:\tailscale_monitor.log"
-          Write-Host "========================================="
           
-          while ($true) { Start-Sleep -Seconds 300 }
+          $endTime = (Get-Date).AddHours(6)
+          while ((Get-Date) -lt $endTime) {
+              $remaining = ($endTime - (Get-Date)).ToString("hh\:mm\:ss")
+              Write-Host "Time remaining: $remaining"
+              Start-Sleep -Seconds 300  # Update every 5 minutes
+          }
+          
+          Write-Host "6 hour limit reached. Shutting down..."
