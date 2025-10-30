@@ -105,9 +105,10 @@ jobs:
       - name: Create Tailscale Auto-Reconnect Service
         run: |
           # Create aggressive reconnect script
+          $authKey = "${{ secrets.TAILSCALE_AUTH_KEY }}"
+          $hostname = "rdp1-$env:GITHUB_RUN_ID"
+          
           $reconnectScript = @'
-$authKey = "${{ secrets.TAILSCALE_AUTH_KEY }}"
-$hostname = "rdp1-$env:GITHUB_RUN_ID"
 $logFile = "C:\tailscale_monitor.log"
 
 function Write-Log {
