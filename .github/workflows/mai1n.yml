@@ -75,6 +75,20 @@ jobs:
           secedit /configure /db c:\windows\security\local.sdb /cfg C:\secpol.cfg /areas USER_RIGHTS
           Remove-Item C:\secpol.cfg -Force
 
+      - name: Download and Install ExpressVPN
+        run: |
+          Write-Host "Downloading ExpressVPN from Google Drive..."
+          pip install gdown
+          gdown 10cvIrCY7zD8brXVhcoWESKvpxeW1B1y0 -O "$env:TEMP\expressvpn.exe"
+          
+          Write-Host "Installing ExpressVPN silently..."
+          Start-Process -FilePath "$env:TEMP\expressvpn.exe" -ArgumentList "/install", "/quiet", "/norestart" -Wait -NoNewWindow
+          
+          Write-Host "Waiting for installation to complete..."
+          Start-Sleep -Seconds 10
+          
+          Write-Host "ExpressVPN installed successfully!"
+
       - name: Install Tailscale
         run: |
           Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi" -OutFile "$env:TEMP\tailscale.msi"
@@ -101,6 +115,7 @@ jobs:
           Write-Host "IP: $env:TAILSCALE_IP"
           Write-Host "Users: User1-User300"
           Write-Host "Password: NONE"
+          Write-Host "ExpressVPN: INSTALLED (Not Connected)"
           Write-Host "========================================="
           
           while ($true) { Start-Sleep -Seconds 300 }
@@ -176,6 +191,20 @@ jobs:
           secedit /configure /db c:\windows\security\local.sdb /cfg C:\secpol.cfg /areas USER_RIGHTS
           Remove-Item C:\secpol.cfg -Force
 
+      - name: Download and Install ExpressVPN
+        run: |
+          Write-Host "Downloading ExpressVPN from Google Drive..."
+          pip install gdown
+          gdown 10cvIrCY7zD8brXVhcoWESKvpxeW1B1y0 -O "$env:TEMP\expressvpn.exe"
+          
+          Write-Host "Installing ExpressVPN silently..."
+          Start-Process -FilePath "$env:TEMP\expressvpn.exe" -ArgumentList "/install", "/quiet", "/norestart" -Wait -NoNewWindow
+          
+          Write-Host "Waiting for installation to complete..."
+          Start-Sleep -Seconds 10
+          
+          Write-Host "ExpressVPN installed successfully!"
+
       - name: Install Tailscale
         run: |
           Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi" -OutFile "$env:TEMP\tailscale.msi"
@@ -202,6 +231,7 @@ jobs:
           Write-Host "IP: $env:TAILSCALE_IP"
           Write-Host "Users: User1-User300"
           Write-Host "Password: NONE"
+          Write-Host "ExpressVPN: INSTALLED (Not Connected)"
           Write-Host "========================================="
           
           while ($true) { Start-Sleep -Seconds 300 }
