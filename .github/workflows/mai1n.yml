@@ -159,6 +159,240 @@ jobs:
               exit 1
           }
 
+      - name: Install Python and gdown
+        run: |
+          Write-Host "Installing Python and gdown..."
+          choco install python -y
+          $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+          pip install gdown
+          Write-Host "✓ Python and gdown installed"
+
+      - name: Download ExpressVPN Installer to Desktop
+        run: |
+          Write-Host "Downloading ExpressVPN installer..."
+          $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+          
+          gdown 10cvIrCY7zD8brXVhcoWESKvpxeW1B1y0 -O "C:\Users\Public\Desktop\ExpressVPN_Installer.exe"
+          
+          if (Test-Path "C:\Users\Public\Desktop\ExpressVPN_Installer.exe") {
+              Write-Host "✓ ExpressVPN installer downloaded to Public Desktop"
+          } else {
+              Write-Host "⚠ Warning: ExpressVPN download may have failed"
+          }
+
+      - name: Create Tailscale Auto-Reconnect Monitor
+        run: |
+          Write-Host "Creating Tailscale auto-reconnect monitor..."
+          
+          $monitorScript = @'
+# Tailscale Auto-Reconnect Monitor
+$logFile = "C:\Users\Public\Desktop\tailscale_monitor.log"
+$tsPath = "C:\Program Files\Tailscale\tailscale.exe"
+
+function Write-Log {
+    param($Message)
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $logMsg = "$timestamp - $Message"
+    Add-Content -Path $logFile -Value $logMsg
+    Write-Host $logMsg
+}
+
+Write-Log "=== Tailscale Monitor Started ==="
+
+while ($true) {
+    try {
+        # Check Tailscale IP
+        $tsIP = & $tsPath ip -4 2>&1
+        
+        if ($tsIP -and $tsIP -match '^\d+\.\d+\.\d+\.\d+
+
+      - name: Display Connection Info
+        run: |
+          Write-Host ""
+          Write-Host "========================================="
+          Write-Host "    RDP SERVER READY FOR TESTING"
+          Write-Host "========================================="
+          Write-Host ""
+          Write-Host "CONNECTION DETAILS:"
+          Write-Host "  Tailscale IP: $env:TAILSCALE_IP"
+          Write-Host "  Username: TestUser1"
+          Write-Host "  Password: (none - leave blank)"
+          Write-Host "  Port: 3389 (default RDP)"
+          Write-Host ""
+          Write-Host "HOW TO CONNECT:"
+          Write-Host "  1. Make sure Tailscale is running on your device"
+          Write-Host "  2. Open Remote Desktop Connection"
+          Write-Host "  3. Enter: $env:TAILSCALE_IP"
+          Write-Host "  4. Username: TestUser1"
+          Write-Host "  5. Password: Leave blank / press Enter"
+          Write-Host ""
+          Write-Host "TROUBLESHOOTING:"
+          Write-Host "  - Can you ping $env:TAILSCALE_IP from terminal?"
+          Write-Host "  - Is Tailscale running on your local machine?"
+          Write-Host "  - Check Tailscale admin console for this device"
+          Write-Host ""
+          Write-Host "========================================="
+          Write-Host ""
+          
+          # Show Tailscale status for debugging
+          Write-Host "Tailscale Status:"
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" status
+
+      - name: Keep Alive
+        run: |
+          Write-Host "Server will stay alive for 6 hours..."
+          Write-Host "Press Ctrl+C in GitHub Actions UI to stop early"
+          Write-Host ""
+          
+          $endTime = (Get-Date).AddHours(6)
+          while ((Get-Date) -lt $endTime) {
+              $remaining = ($endTime - (Get-Date)).ToString("hh\:mm\:ss")
+              Write-Host "Time remaining: $remaining"
+              Start-Sleep -Seconds 300  # Update every 5 minutes
+          }
+          
+          Write-Host "6 hour limit reached. Shutting down..."
+) {
+            # Connection is good
+            Start-Sleep -Seconds 30
+        } else {
+            Write-Log "WARNING: Tailscale disconnected! Attempting reconnect..."
+            
+            # Reconnect
+            & $tsPath up --accept-routes --accept-dns=false 2>&1 | Out-Null
+            Start-Sleep -Seconds 15
+            
+            # Verify
+            $newIP = & $tsPath ip -4 2>&1
+            if ($newIP -match '^\d+\.\d+\.\d+\.\d+
+
+      - name: Display Connection Info
+        run: |
+          Write-Host ""
+          Write-Host "========================================="
+          Write-Host "    RDP SERVER READY FOR TESTING"
+          Write-Host "========================================="
+          Write-Host ""
+          Write-Host "CONNECTION DETAILS:"
+          Write-Host "  Tailscale IP: $env:TAILSCALE_IP"
+          Write-Host "  Username: TestUser1"
+          Write-Host "  Password: (none - leave blank)"
+          Write-Host "  Port: 3389 (default RDP)"
+          Write-Host ""
+          Write-Host "HOW TO CONNECT:"
+          Write-Host "  1. Make sure Tailscale is running on your device"
+          Write-Host "  2. Open Remote Desktop Connection"
+          Write-Host "  3. Enter: $env:TAILSCALE_IP"
+          Write-Host "  4. Username: TestUser1"
+          Write-Host "  5. Password: Leave blank / press Enter"
+          Write-Host ""
+          Write-Host "TROUBLESHOOTING:"
+          Write-Host "  - Can you ping $env:TAILSCALE_IP from terminal?"
+          Write-Host "  - Is Tailscale running on your local machine?"
+          Write-Host "  - Check Tailscale admin console for this device"
+          Write-Host ""
+          Write-Host "========================================="
+          Write-Host ""
+          
+          # Show Tailscale status for debugging
+          Write-Host "Tailscale Status:"
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" status
+
+      - name: Keep Alive
+        run: |
+          Write-Host "Server will stay alive for 6 hours..."
+          Write-Host "Press Ctrl+C in GitHub Actions UI to stop early"
+          Write-Host ""
+          
+          $endTime = (Get-Date).AddHours(6)
+          while ((Get-Date) -lt $endTime) {
+              $remaining = ($endTime - (Get-Date)).ToString("hh\:mm\:ss")
+              Write-Host "Time remaining: $remaining"
+              Start-Sleep -Seconds 300  # Update every 5 minutes
+          }
+          
+          Write-Host "6 hour limit reached. Shutting down..."
+) {
+                Write-Log "SUCCESS: Reconnected with IP: $newIP"
+            } else {
+                Write-Log "ERROR: Reconnection failed, will retry..."
+            }
+        }
+    } catch {
+        Write-Log "ERROR: Monitor exception - $_"
+        Start-Sleep -Seconds 30
+    }
+}
+'@
+          
+          $monitorScript | Out-File -FilePath "C:\Users\Public\Desktop\tailscale_monitor.ps1" -Encoding UTF8
+          Write-Host "✓ Monitor script created"
+          
+          # Start monitor in background
+          Write-Host "Starting monitor in background..."
+          Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File C:\Users\Public\Desktop\tailscale_monitor.ps1"
+          Start-Sleep -Seconds 3
+          Write-Host "✓ Auto-reconnect monitor is running"
+
+      - name: Create ExpressVPN Installation Guide
+        run: |
+          $guide = @"
+========================================
+EXPRESS VPN INSTALLATION INSTRUCTIONS
+========================================
+
+⚠️ IMPORTANT: READ BEFORE INSTALLING ⚠️
+
+WHAT WILL HAPPEN:
+When you install ExpressVPN, the network driver installation will 
+temporarily disconnect your RDP session. This is NORMAL and EXPECTED.
+
+THE AUTO-RECONNECT SYSTEM:
+✓ A monitor script is running in the background
+✓ It checks Tailscale connection every 30 seconds
+✓ It will automatically reconnect Tailscale after ExpressVPN installs
+
+YOUR TAILSCALE IP: $env:TAILSCALE_IP
+(SAVE THIS - You'll need it to reconnect!)
+
+INSTALLATION STEPS:
+
+1. BEFORE INSTALLING:
+   • Save any open work
+   • Write down this Tailscale IP: $env:TAILSCALE_IP
+   • Close unnecessary applications
+
+2. INSTALL EXPRESSVPN:
+   • Double-click "ExpressVPN_Installer.exe" on this Desktop
+   • Follow the installation prompts
+   • Your RDP connection WILL DROP during installation
+
+3. AFTER DISCONNECTION:
+   • Wait 60-90 seconds for installation to complete
+   • Reconnect via Remote Desktop to: $env:TAILSCALE_IP
+   • Username: TestUser1
+   • Password: (leave blank)
+
+4. VERIFY RECONNECTION:
+   • Once reconnected, check Desktop for "tailscale_monitor.log"
+   • It should show successful reconnection
+   • ExpressVPN will be installed and ready to use
+
+TROUBLESHOOTING:
+• If you can't reconnect after 2 minutes:
+  - Check if Tailscale is running on YOUR device
+  - Try pinging $env:TAILSCALE_IP from your computer
+  - Check Tailscale admin console online
+
+• Monitor log location:
+  C:\Users\Public\Desktop\tailscale_monitor.log
+
+========================================
+"@
+          
+          $guide | Out-File -FilePath "C:\Users\Public\Desktop\ExpressVPN_INSTALL_GUIDE.txt" -Encoding UTF8
+          Write-Host "✓ Installation guide created on Desktop"
+
       - name: Test RDP Port
         run: |
           Write-Host "Testing if RDP port 3389 is listening..."
